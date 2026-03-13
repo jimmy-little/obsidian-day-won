@@ -1,7 +1,7 @@
 {
 	"id": "day-won",
 	"name": "Day, Won!",
-	"version": "1.0.2",
+	"version": "0.0.1",
 	"minAppVersion": "0.15.0",
 	"description": "Day, Won! — a Day One–style journal for Obsidian.",
 	"author": "jimmy-little",
