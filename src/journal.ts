@@ -1,0 +1,478 @@
+import { TFile, TFolder, Vault, MetadataCache } from "obsidian";
+
+/** Optional entry type: workout, location/check-in, or trip. Classified by path or frontmatter rules; frontmatter wins over path. */
+export type EntryTypeKind = "workout" | "location" | "trip";
+
+/** A single journal entry: one note with resolved date and optional first image. */
+export interface JournalEntry {
+  file: TFile;
+  date: string; // YYYY-MM-DD
+  time: string; // optional, for ordering (e.g. "21:20")
+  /** Display name in list (from entry property or first line / file name) */
+  name: string;
+  /** First line of body or file name for preview / fallback */
+  preview: string;
+  /** Section label from journal property (e.g. Life, Stats, Daily) */
+  journal: string;
+  /** Vault-relative path to first image in the note, or null */
+  firstImagePath: string | null;
+  /** Frontmatter cover/image path when present; use as card header (not tiled). */
+  coverImagePath: string | null;
+  /** All image paths from the note (body + frontmatter) for tiling in day view. */
+  imagePaths: string[];
+  /** Optional: workout, location, or trip when rules match. Frontmatter match wins over path. */
+  entryType: EntryTypeKind | null;
+}
+
+export interface EntryTypeRule {
+  mode: "" | "path" | "frontmatter";
+  value: string;
+}
+
+/** Group entries by date (YYYY-MM-DD). Multiple entries per day are in the same key. */
+export function groupEntriesByDate(entries: JournalEntry[]): Map<string, JournalEntry[]> {
+  const map = new Map<string, JournalEntry[]>();
+  for (const e of entries) {
+    const list = map.get(e.date) ?? [];
+    list.push(e);
+    map.set(e.date, list);
+  }
+  // Sort each day's entries by time if present
+  for (const list of map.values()) {
+    list.sort((a, b) => (a.time || "00:00").localeCompare(b.time || "00:00"));
+  }
+  return map;
+}
+
+/** Group entries by month (YYYY-MM) for list view. */
+export function groupEntriesByMonth(entries: JournalEntry[]): Map<string, JournalEntry[]> {
+  const map = new Map<string, JournalEntry[]>();
+  for (const e of entries) {
+    const month = e.date.slice(0, 7);
+    const list = map.get(month) ?? [];
+    list.push(e);
+    map.set(month, list);
+  }
+  for (const list of map.values()) {
+    list.sort((a, b) => {
+      const d = a.date.localeCompare(b.date);
+      return d !== 0 ? d : (a.time || "00:00").localeCompare(b.time || "00:00");
+    });
+  }
+  return map;
+}
+
+/** Group entries by journal (section) for list view. Returns map of journal name → entries (newest first). */
+export function groupEntriesByJournal(entries: JournalEntry[]): Map<string, JournalEntry[]> {
+  const map = new Map<string, JournalEntry[]>();
+  for (const e of entries) {
+    const key = e.journal || "Default";
+    const list = map.get(key) ?? [];
+    list.push(e);
+    map.set(key, list);
+  }
+  for (const list of map.values()) {
+    list.sort((a, b) => {
+      const d = b.date.localeCompare(a.date); // newest first
+      return d !== 0 ? d : (b.time || "00:00").localeCompare(a.time || "00:00");
+    });
+  }
+  return map;
+}
+
+const IMAGE_MD_REGEX = /!\[([^\]]*)\]\(([^)]+)\)/;
+const IMAGE_WIKILINK_REGEX = /!\[\[([^\]|]+)(?:\|[^\]]*)?\]\]/g;
+
+function getFirstImageFromContent(content: string, file: TFile): string | null {
+  const dir = (file.parent && file.parent.path) ? file.parent.path + "/" : "";
+
+  const tryMd = content.match(IMAGE_MD_REGEX);
+  if (tryMd) {
+    const src = tryMd[2].trim();
+    if (src && !src.startsWith("http://") && !src.startsWith("https://") && !src.startsWith("app://")) {
+      return dir ? resolveRelativePath(dir, src) : src;
+    }
+  }
+
+  const wikilink = IMAGE_WIKILINK_REGEX.exec(content);
+  IMAGE_WIKILINK_REGEX.lastIndex = 0;
+  if (wikilink) {
+    const raw = wikilink[1].trim();
+    if (!raw) return null;
+    if (raw.startsWith("http://") || raw.startsWith("https://")) return null;
+    return raw;
+  }
+  return null;
+}
+
+/** Collect all image paths from note content (markdown and wikilinks). */
+function getAllImagePathsFromContent(content: string, file: TFile): string[] {
+  const dir = (file.parent && file.parent.path) ? file.parent.path + "/" : "";
+  const out: string[] = [];
+  const seen = new Set<string>();
+
+  const mdMatches = content.matchAll(new RegExp(IMAGE_MD_REGEX.source, "g"));
+  for (const m of mdMatches) {
+    const src = m[2].trim();
+    if (src && !src.startsWith("http://") && !src.startsWith("https://") && !src.startsWith("app://")) {
+      const resolved = dir ? resolveRelativePath(dir, src) : src;
+      if (!seen.has(resolved)) {
+        seen.add(resolved);
+        out.push(resolved);
+      }
+    }
+  }
+
+  IMAGE_WIKILINK_REGEX.lastIndex = 0;
+  let w;
+  while ((w = IMAGE_WIKILINK_REGEX.exec(content)) !== null) {
+    const raw = w[1].trim();
+    if (raw && !raw.startsWith("http://") && !raw.startsWith("https://") && !seen.has(raw)) {
+      seen.add(raw);
+      out.push(raw);
+    }
+  }
+  IMAGE_WIKILINK_REGEX.lastIndex = 0;
+  return out;
+}
+
+const WIKILINK_IN_FM_REGEX = /^\[\[([^\]|]+)(?:\|[^\]]*)?\]\]$/;
+
+/** Parse first inline field in content, e.g. "entry:: value" (key is case-sensitive). */
+function getInlineFieldValue(content: string, fieldKey: string): string | null {
+  const escaped = fieldKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`^\\s*${escaped}::\\s*(.+)$`, "m");
+  const match = content.match(re);
+  if (!match) return null;
+  return match[1].trim() || null;
+}
+
+function getFrontmatterImagePath(front: Record<string, unknown> | undefined, file: TFile): string | null {
+  if (!front) return null;
+  const keys = ["cover", "image", "banner", "photo", "thumbnail"];
+  for (const k of keys) {
+    const v = front[k];
+    if (typeof v !== "string" || !v.trim()) continue;
+    let src = v.trim();
+    const wikilinkMatch = src.match(WIKILINK_IN_FM_REGEX);
+    if (wikilinkMatch) src = wikilinkMatch[1].trim();
+    if (!src || src.startsWith("http://") || src.startsWith("https://")) continue;
+    const dir = (file.parent && file.parent.path) ? file.parent.path + "/" : "";
+    return src.includes("/") ? src : (dir ? resolveRelativePath(dir, src) : src);
+  }
+  return null;
+}
+
+function resolveRelativePath(dir: string, relative: string): string {
+  const parts = (dir + "/" + relative).split("/").filter(Boolean);
+  const out: string[] = [];
+  for (const p of parts) {
+    if (p === "..") out.pop();
+    else if (p !== ".") out.push(p);
+  }
+  return out.join("/");
+}
+
+/** Collect all markdown files under folder (or vault root if folder empty). */
+function getMarkdownFilesInFolder(vault: Vault, folderPath: string): TFile[] {
+  const out: TFile[] = [];
+  const normalized = folderPath.replace(/^\//, "").replace(/\/$/, "").trim();
+
+  function walk(obj: TFile | TFolder | null) {
+    if (!obj) return;
+    if (obj instanceof TFile) {
+      if (obj.extension === "md") out.push(obj);
+      return;
+    }
+    if (obj instanceof TFolder) {
+      for (const c of obj.children) walk(c as TFile | TFolder);
+    }
+  }
+
+  if (normalized) {
+    const node = vault.getAbstractFileByPath(normalized);
+    walk(node as TFolder | TFile | null);
+  } else {
+    for (const f of vault.getMarkdownFiles()) out.push(f);
+  }
+  return out;
+}
+
+/** Parse "Journal folders" setting: newline or comma separated, trimmed, non-empty. */
+export function parseFolderList(input: string): string[] {
+  if (!input || !input.trim()) return [];
+  const parts = input.split(/[\n,]+/).map((p) => p.replace(/^\//, "").replace(/\/$/, "").trim());
+  return parts.filter((p) => p.length > 0);
+}
+
+/** Default header background color for a journal name (used when no config is set). */
+export function getDefaultJournalColor(journalName: string): string {
+  const palette: Record<string, string> = {
+    Life: "#f5c842",
+    Daily: "#4caf50",
+    Stats: "#2196f3",
+    Default: "#78909c",
+  };
+  if (palette[journalName]) return palette[journalName];
+  let h = 0;
+  for (let i = 0; i < journalName.length; i++) h = (h << 5) - h + journalName.charCodeAt(i);
+  h = Math.abs(h) % 360;
+  return `hsl(${h}, 55%, 52%)`;
+}
+
+/** Discover unique journal names from folders (notes with date in frontmatter). Sync, no file reads. */
+export function getJournalNamesFromFolders(
+  vault: Vault,
+  metadataCache: MetadataCache,
+  folderList: string[],
+  dateProperty: string,
+  journalProperty: string
+): string[] {
+  const files = getMarkdownFilesInFolders(vault, folderList);
+  const set = new Set<string>();
+  for (const file of files) {
+    const cache = metadataCache.getFileCache(file);
+    const front = cache?.frontmatter;
+    const rawDate = front?.[dateProperty];
+    if (rawDate == null) continue;
+    if (parseDate(rawDate) == null) continue;
+    const journal = (front?.[journalProperty] ?? "") as string;
+    const name = typeof journal === "string" ? journal.trim() : "";
+    set.add(name || "Default");
+  }
+  return [...set].sort((a, b) => (a === "Default" ? 1 : a.localeCompare(b)));
+}
+
+/** Collect markdown files from multiple folders (deduped by path). Empty folderList = whole vault. */
+function getMarkdownFilesInFolders(vault: Vault, folderList: string[]): TFile[] {
+  const seen = new Set<string>();
+  const out: TFile[] = [];
+  if (folderList.length === 0) {
+    for (const f of vault.getMarkdownFiles()) {
+      if (!seen.has(f.path)) {
+        seen.add(f.path);
+        out.push(f);
+      }
+    }
+    return out;
+  }
+  for (const folderPath of folderList) {
+    for (const f of getMarkdownFilesInFolder(vault, folderPath)) {
+      if (!seen.has(f.path)) {
+        seen.add(f.path);
+        out.push(f);
+      }
+    }
+  }
+  return out;
+}
+
+/** Entry type rules keyed by kind. Used to classify notes; frontmatter match wins over path. */
+export interface EntryTypeRules {
+  workout: EntryTypeRule;
+  location: EntryTypeRule;
+  trip: EntryTypeRule;
+}
+
+/** Parse comma-separated "key: value" frontmatter conditions. Values may be quoted. */
+function parseFrontmatterConditions(value: string): { key: string; value: string }[] {
+  const out: { key: string; value: string }[] = [];
+  const parts = value.split(",").map((s) => s.trim()).filter(Boolean);
+  for (const part of parts) {
+    const colon = part.indexOf(":");
+    if (colon === -1) continue;
+    const key = part.slice(0, colon).trim();
+    let val = part.slice(colon + 1).trim();
+    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'")))
+      val = val.slice(1, -1);
+    out.push({ key, value: val });
+  }
+  return out;
+}
+
+/** Check if note frontmatter matches all given key:value conditions. */
+function frontmatterMatches(front: Record<string, unknown> | undefined, conditions: { key: string; value: string }[]): boolean {
+  if (!front || conditions.length === 0) return false;
+  for (const { key, value } of conditions) {
+    const v = front[key];
+    const str = v != null ? String(v).trim() : "";
+    if (str !== value) return false;
+  }
+  return true;
+}
+
+/** Check if file path is under any of the given folder paths (vault-relative, no leading slash). */
+function pathUnderFolders(filePath: string, folderList: string[]): boolean {
+  const normalized = filePath.replace(/^\/+/, "");
+  for (const folder of folderList) {
+    const f = folder.replace(/^\/+/, "").replace(/\/+$/, "");
+    if (f === "" || normalized === f || normalized.startsWith(f + "/")) return true;
+  }
+  return false;
+}
+
+/** Classify a note: frontmatter rules first, then path rules. Returns first matching type or null. */
+function classifyEntryType(
+  filePath: string,
+  front: Record<string, unknown> | undefined,
+  rules: EntryTypeRules
+): EntryTypeKind | null {
+  const kinds: EntryTypeKind[] = ["workout", "location", "trip"];
+  // 1) Frontmatter wins: check each type's frontmatter rule
+  for (const kind of kinds) {
+    const r = rules[kind];
+    if (r?.mode !== "frontmatter" || !r.value.trim()) continue;
+    const conditions = parseFrontmatterConditions(r.value);
+    if (frontmatterMatches(front, conditions)) return kind;
+  }
+  // 2) Path: first matching path rule
+  for (const kind of kinds) {
+    const r = rules[kind];
+    if (r?.mode !== "path" || !r.value.trim()) continue;
+    const paths = r.value.split(",").map((s) => s.trim()).filter(Boolean);
+    if (pathUnderFolders(filePath, paths)) return kind;
+  }
+  return null;
+}
+
+/** Build journal entries from vault: scan folder(s), read frontmatter and first image. */
+export async function getJournalEntries(
+  vault: Vault,
+  metadataCache: MetadataCache,
+  folderList: string[],
+  dateProperty: string,
+  timeProperty: string,
+  entryProperty: string,
+  journalProperty: string,
+  entryTypeRules?: EntryTypeRules
+): Promise<JournalEntry[]> {
+  const rules: EntryTypeRules = entryTypeRules ?? {
+    workout: { mode: "", value: "" },
+    location: { mode: "", value: "" },
+    trip: { mode: "", value: "" },
+  };
+
+  const files = getMarkdownFilesInFolders(vault, folderList);
+  const candidates: { file: TFile; date: string; timeStr: string; journal: string; entryName: string }[] = [];
+
+  for (const file of files) {
+    const cache = metadataCache.getFileCache(file);
+    const front = cache?.frontmatter;
+    const rawDate = front?.[dateProperty];
+    if (rawDate == null) continue;
+    const date = parseDate(rawDate);
+    if (!date) continue;
+    const time = (front?.[timeProperty] ?? "") as string;
+    const timeStr = typeof time === "string" ? time : "";
+    const journal = (front?.[journalProperty] ?? "") as string;
+    const journalStr = typeof journal === "string" ? journal.trim() : "";
+    const entryVal = front?.[entryProperty];
+    const entryName = typeof entryVal === "string" ? entryVal.trim() : "";
+    candidates.push({ file, date, timeStr, journal: journalStr, entryName });
+  }
+
+  const entries: JournalEntry[] = [];
+  for (const { file, date, timeStr, journal, entryName } of candidates) {
+    let firstImagePath: string | null = null;
+    const cache = metadataCache.getFileCache(file);
+    const front = cache?.frontmatter;
+    const frontImg = getFrontmatterImagePath(front, file);
+    if (frontImg) firstImagePath = frontImg;
+    const entryType = classifyEntryType(file.path, front, rules);
+    let preview = file.basename;
+    let name = entryName || preview;
+    let imagePaths: string[] = [];
+    try {
+      const content = await vault.cachedRead(file);
+      if (!firstImagePath) {
+        const contentImg = getFirstImageFromContent(content, file);
+        if (contentImg) firstImagePath = contentImg;
+      }
+      const fromContent = getAllImagePathsFromContent(content, file);
+      if (frontImg) imagePaths = [frontImg, ...fromContent.filter((p) => p !== frontImg)];
+      else imagePaths = fromContent;
+      const firstLine = content
+        .split("\n")
+        .find((l) => l.trim().length > 0 && !l.trim().startsWith("#") && !l.trim().startsWith("---"));
+      if (firstLine) preview = firstLine.trim().slice(0, 120);
+      const inlineEntry = entryProperty ? getInlineFieldValue(content, entryProperty) : null;
+      name = entryName || inlineEntry || preview;
+    } catch {
+      // ignore read errors
+    }
+    if (firstImagePath && imagePaths.length === 0) imagePaths = [firstImagePath];
+    entries.push({
+      file,
+      date,
+      time: timeStr,
+      name,
+      preview,
+      journal,
+      firstImagePath,
+      coverImagePath: frontImg || null,
+      imagePaths,
+      entryType,
+    });
+  }
+
+  entries.sort((a, b) => {
+    const d = a.date.localeCompare(b.date);
+    return d !== 0 ? d : (a.time || "00:00").localeCompare(b.time || "00:00");
+  });
+  return entries;
+}
+
+function parseDate(raw: unknown): string | null {
+  if (typeof raw !== "string" && typeof raw !== "number") return null;
+  const s = String(raw).trim();
+  const dateOnlyMatch = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (dateOnlyMatch) {
+    const y = parseInt(dateOnlyMatch[1], 10);
+    const m = parseInt(dateOnlyMatch[2], 10) - 1;
+    const d = parseInt(dateOnlyMatch[3], 10);
+    const local = new Date(y, m, d);
+    if (Number.isNaN(local.getTime())) return null;
+    return `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  }
+  const parsed = new Date(s);
+  if (Number.isNaN(parsed.getTime())) return null;
+  const y = parsed.getFullYear();
+  const m = String(parsed.getMonth() + 1).padStart(2, "0");
+  const d = String(parsed.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+/** Streak: consecutive days with at least one entry, counting backward from today (or last entry). */
+export function computeStreak(entries: JournalEntry[]): number {
+  const dates = [...new Set(entries.map((e) => e.date))].sort();
+  if (dates.length === 0) return 0;
+  const today = new Date();
+  const todayStr = formatDateKey(today);
+  let count = 0;
+  let check = todayStr;
+  const set = new Set(dates);
+  while (set.has(check)) {
+    count++;
+    const next = new Date(check);
+    next.setDate(next.getDate() - 1);
+    check = formatDateKey(next);
+  }
+  // If we didn't start from today, streak might be 0 (e.g. no entry today)
+  if (count === 0 && dates[dates.length - 1] !== todayStr) return 0;
+  return count;
+}
+
+function formatDateKey(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/** Number of entries that fall on the same month-day in other years (e.g. "on this day"). */
+export function onThisDayCount(entries: JournalEntry[], month: number, day: number): number {
+  return entries.filter((e) => {
+    const [y, m, d] = e.date.split("-").map(Number);
+    return m === month && d === day;
+  }).length;
+}

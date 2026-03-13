@@ -1,0 +1,16 @@
+# Dependencies
+node_modules/
+
+# Build output
+main.js
+main.js.map
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+*.log
+npm-debug.log*
+
+# Optional
+*.local

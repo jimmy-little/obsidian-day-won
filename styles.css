@@ -1,0 +1,706 @@
+/* Day Won — Day One-style journal. Mobile-friendly, dark mode supported. */
+
+.day-won-view {
+  --day-won-accent: #f5c842;
+  --day-won-accent-dim: #e5b830;
+  --day-won-bg: var(--background-primary);
+  --day-won-bg-secondary: var(--background-secondary);
+  --day-won-text: var(--text-normal);
+  --day-won-text-muted: var(--text-muted);
+  --day-won-border: var(--background-modifier-border);
+}
+
+.day-won {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.day-won-header {
+  flex-shrink: 0;
+  background: var(--day-won-header-bg, var(--day-won-accent));
+  color: var(--day-won-header-fg, #1a1a1a);
+  padding: 12px 16px 10px;
+}
+
+.theme-dark .day-won-header {
+  background: var(--day-won-header-bg, var(--day-won-accent-dim));
+  color: var(--day-won-header-fg, #1a1a1a);
+}
+
+.day-won-header-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.day-won-title-wrap {
+  flex: 1;
+  min-width: 0;
+}
+
+.day-won-picker-wrap {
+  flex-shrink: 0;
+}
+
+.day-won-picker {
+  width: auto;
+  min-width: 90px;
+  max-width: 140px;
+  padding: 4px 8px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  border: none;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.12);
+  color: inherit;
+  cursor: pointer;
+  appearance: auto;
+}
+
+.day-won-picker:hover {
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.day-won-picker:focus {
+  outline: 2px solid rgba(255, 255, 255, 0.6);
+  outline-offset: 2px;
+}
+
+
+.day-won-title {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.day-won-range {
+  font-size: 0.85rem;
+  opacity: 0.85;
+}
+
+.day-won-nav {
+  display: flex;
+  gap: 4px;
+  background: var(--day-won-bg-secondary);
+  border-radius: 8px;
+  padding: 4px;
+}
+
+.day-won-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--day-won-text-muted);
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.day-won-tab:hover {
+  color: var(--day-won-text);
+}
+
+.day-won-tab.is-active {
+  background: var(--day-won-header-bg, var(--day-won-accent));
+  color: var(--day-won-header-fg, #1a1a1a);
+}
+
+.theme-dark .day-won-tab.is-active {
+  background: var(--day-won-header-bg, var(--day-won-accent-dim));
+}
+
+.day-won-body {
+  flex: 1;
+  overflow: auto;
+  padding: 16px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.day-won-loading,
+.day-won-error {
+  color: var(--day-won-text-muted);
+  padding: 1rem 0;
+}
+
+.day-won-error {
+  color: var(--text-error);
+}
+
+.day-won-settings-journals-heading {
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+}
+
+/* Summary */
+.day-won-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 12px;
+}
+
+.day-won-stat {
+  padding: 12px;
+  background: var(--day-won-bg-secondary);
+  border-radius: 8px;
+  border: 1px solid var(--day-won-border);
+}
+
+.day-won-stat-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--day-won-text-muted);
+  margin-bottom: 4px;
+}
+
+.day-won-stat-value {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--day-won-text);
+}
+
+/* List */
+.day-won-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.day-won-list-journal-section {
+  margin-bottom: 1.5rem;
+}
+
+.day-won-list-journal-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--day-won-text);
+  margin: 0 0 0.75rem;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--day-won-border);
+}
+
+.day-won-list-year-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--day-won-text-muted);
+  margin: 1rem 0 0.35rem;
+}
+
+.day-won-list-month-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--day-won-text-muted);
+  margin: 0.75rem 0 0.25rem;
+}
+
+.day-won-list-day-header {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--day-won-text-muted);
+  margin: 10px 0 4px;
+}
+
+.day-won-list-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  margin: 4px 0;
+  border-radius: 8px;
+  cursor: pointer;
+  background: var(--day-won-bg-secondary);
+  border: 1px solid transparent;
+}
+
+.day-won-list-entry:hover {
+  border-color: var(--day-won-border);
+  background: var(--background-modifier-hover);
+}
+
+.day-won-list-time {
+  flex-shrink: 0;
+  font-size: 0.8rem;
+  color: var(--day-won-text-muted);
+  min-width: 2.5rem;
+}
+
+.day-won-list-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.day-won-list-preview {
+  flex: 1;
+  font-size: 0.9rem;
+  color: var(--day-won-text);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.day-won-list-thumb {
+  flex-shrink: 0;
+  width: 48px;
+  height: 48px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--day-won-border);
+}
+
+.day-won-list-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Calendar */
+.day-won-calendar-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.day-won-calendar-sentinel {
+  min-height: 1px;
+  height: 1px;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.day-won-calendar-month {
+  margin-bottom: 1.25rem;
+}
+
+.day-won-calendar-title {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0 0 10px;
+  color: var(--day-won-text);
+}
+
+.day-won-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+
+.day-won-calendar-cell {
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  border-radius: 6px;
+  background: var(--day-won-bg-secondary);
+  border: 1px solid var(--day-won-border);
+}
+
+.day-won-calendar-cell-head {
+  font-weight: 600;
+  color: var(--day-won-text-muted);
+  aspect-ratio: auto;
+  min-height: 28px;
+}
+
+.day-won-calendar-cell-empty {
+  background: transparent;
+  border-color: transparent;
+}
+
+.day-won-calendar-cell-day {
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  position: relative;
+  cursor: default;
+  flex-direction: column;
+  justify-content: flex-start;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+.day-won-calendar-cell-day.is-today {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
+  z-index: 1;
+}
+
+.day-won-calendar-cell-day.has-entries {
+  cursor: pointer;
+}
+
+.day-won-calendar-day-dots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  justify-content: center;
+  align-items: center;
+  margin-top: auto;
+  margin-bottom: 0;
+  min-height: 6px;
+  position: relative;
+  z-index: 1;
+}
+
+.day-won-calendar-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.day-won-calendar-cell-day.has-entries:hover {
+  outline: 2px solid var(--day-won-accent);
+  outline-offset: 2px;
+}
+
+.day-won-calendar-day-num {
+  position: relative;
+  z-index: 1;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.day-won-calendar-cell-day:not(.has-entries) .day-won-calendar-day-num {
+  background: transparent;
+  color: var(--day-won-text);
+}
+
+/* Day detail full-page view (Day One style) */
+.day-won-day-detail {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  background: var(--day-won-bg);
+}
+
+.day-won-day-loading {
+  padding: 2rem;
+  color: var(--day-won-text-muted);
+}
+
+.day-won-day-header {
+  flex-shrink: 0;
+  padding: 12px 16px 10px;
+  background: var(--day-won-bg-secondary);
+  border-bottom: 1px solid var(--day-won-border);
+}
+
+.day-won-day-nav-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.day-won-day-back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--day-won-bg);
+  color: var(--day-won-text);
+  cursor: pointer;
+}
+
+.day-won-day-back:hover {
+  background: var(--background-modifier-hover);
+}
+
+.day-won-day-date-wrap {
+  flex: 1;
+  text-align: center;
+  min-width: 0;
+}
+
+.day-won-day-date {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--day-won-text);
+}
+
+.day-won-day-ago {
+  font-size: 0.8rem;
+  color: var(--day-won-text-muted);
+}
+
+.day-won-day-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--day-won-text-muted);
+  cursor: pointer;
+}
+
+.day-won-day-arrow:hover {
+  background: var(--background-modifier-hover);
+  color: var(--day-won-text);
+}
+
+.day-won-day-count-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 4px;
+}
+
+.day-won-day-count {
+  font-size: 0.85rem;
+  color: var(--day-won-text-muted);
+}
+
+.day-won-day-body {
+  flex: 1;
+  overflow: auto;
+  padding: 16px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.day-won-day-empty {
+  color: var(--day-won-text-muted);
+  padding: 2rem 0;
+  text-align: center;
+}
+
+/* Card grid (Bases-style) */
+.day-won-day-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+/* Card: defined background (lighter in dark mode, darker in light mode) */
+.day-won-day-card {
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--day-won-border);
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.theme-light .day-won-day-card {
+  background: var(--day-won-card-bg, #f5f5f7);
+}
+
+.theme-dark .day-won-day-card {
+  background: var(--day-won-card-bg, rgba(255, 255, 255, 0.06));
+}
+
+.day-won-day-card:hover {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.theme-dark .day-won-day-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+/* Card header: cover image only */
+.day-won-day-card-header {
+  flex-shrink: 0;
+  position: relative;
+  min-height: 120px;
+}
+
+.day-won-day-card-header-image {
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  min-height: 140px;
+}
+
+/* Card body: row with floated-left icon + text (Day One style) */
+.day-won-day-card-body {
+  padding: 12px 14px;
+  flex: 1;
+  min-width: 0;
+}
+
+.day-won-day-card-body-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+/* Floated-left icon area (like Day One location/workout cards) */
+.day-won-day-card-icon-wrap {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--background-primary);
+  border: 1px solid var(--day-won-border);
+}
+
+.day-won-day-card-icon-wrap .day-won-day-card-icon {
+  width: 24px;
+  height: 24px;
+  color: inherit;
+}
+
+.day-won-day-card-icon-wrap.day-won-day-type-workout {
+  color: #4caf50;
+}
+
+.day-won-day-card-icon-wrap.day-won-day-type-location {
+  color: #2196f3;
+}
+
+.day-won-day-card-icon-wrap.day-won-day-type-trip {
+  color: #ff9800;
+}
+
+.day-won-day-card-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.day-won-day-card-time {
+  font-size: 0.8rem;
+  color: var(--day-won-text-muted);
+  margin-bottom: 2px;
+}
+
+.day-won-day-card-name {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--day-won-text);
+  line-height: 1.35;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* Body images inside card (tiled, not the cover) */
+.day-won-day-card-images {
+  display: grid;
+  gap: 4px;
+  margin-top: 10px;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.day-won-day-card-images[data-count="1"] {
+  grid-template-columns: 1fr;
+}
+
+.day-won-day-card-images[data-count="2"],
+.day-won-day-card-images[data-count="3"],
+.day-won-day-card-images[data-count="4"] {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.day-won-day-card-image-cell {
+  aspect-ratio: 1;
+  overflow: hidden;
+  background: var(--day-won-border);
+}
+
+.day-won-day-card-image-cell img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Day detail modal */
+.day-won-modal-content h2 {
+  margin: 0 0 1rem;
+  font-size: 1.1rem;
+}
+
+.day-won-modal-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  margin: 4px 0;
+  border-radius: 8px;
+  cursor: pointer;
+  background: var(--background-secondary-alt);
+  border: 1px solid var(--day-won-border);
+}
+
+.day-won-modal-entry:hover {
+  background: var(--background-modifier-hover);
+}
+
+.day-won-modal-time {
+  flex-shrink: 0;
+  font-size: 0.8rem;
+  color: var(--day-won-text-muted);
+}
+
+.day-won-modal-preview {
+  flex: 1;
+  font-size: 0.9rem;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.day-won-modal-thumb {
+  flex-shrink: 0;
+  width: 48px;
+  height: 48px;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.day-won-modal-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Mobile: larger tap targets, single column stats */
+@media (max-width: 400px) {
+  .day-won-nav {
+    flex-wrap: wrap;
+  }
+
+  .day-won-tab {
+    flex: 1;
+    min-width: 0;
+    justify-content: center;
+  }
+
+  .day-won-stats {
+    grid-template-columns: 1fr 1fr;
+  }
+}

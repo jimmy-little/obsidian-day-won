@@ -1,0 +1,29 @@
+{
+  "name": "obsidian-day-won",
+  "version": "1.0.1",
+  "description": "Day Won — Obsidian plugin",
+  "main": "main.js",
+  "type": "module",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+    "build-install": "npm run build && npm run link-vault",
+    "version": "node version-bump.mjs && git add manifest.json versions.json",
+    "release": "node release.mjs",
+    "link-vault": "node link-vault.mjs",
+    "lint": "eslint . --max-warnings 0"
+  },
+  "keywords": [
+    "obsidian",
+    "obsidian-plugin"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.8.0"
+  },
+  "dependencies": {
+    "obsidian": "latest"
+  }
+}

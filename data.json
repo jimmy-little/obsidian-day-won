@@ -1,0 +1,68 @@
+{
+  "journalFolders": "70 Journal\n60 Logs",
+  "journalConfigs": {
+    "Dailily": {
+      "color": "hsl(98, 55%, 52%)",
+      "showInPicker": false
+    },
+    "Daily": {
+      "color": "#e69d1e",
+      "showInPicker": true
+    },
+    "Default": {
+      "color": "#78909c",
+      "showInPicker": true
+    },
+    "Life": {
+      "color": "#fb37b3",
+      "showInPicker": true
+    },
+    "Logging": {
+      "color": "hsl(215, 55%, 52%)",
+      "showInPicker": false
+    },
+    "Monthly Grids": {
+      "color": "hsl(10, 55%, 52%)",
+      "showInPicker": false
+    },
+    "Stats": {
+      "color": "#33d746",
+      "showInPicker": true
+    },
+    "Week Note": {
+      "color": "hsl(350, 55%, 52%)",
+      "showInPicker": false
+    },
+    "Weekly": {
+      "color": "hsl(351, 55%, 52%)",
+      "showInPicker": false
+    },
+    "Work": {
+      "color": "#1c23e3",
+      "showInPicker": true
+    },
+    "Health": {
+      "color": "hsl(348, 55%, 52%)",
+      "showInPicker": true
+    }
+  },
+  "entryTypeWorkout": {
+    "mode": "path",
+    "value": "60 Logs/Workouts"
+  },
+  "entryTypeLocation": {
+    "mode": "frontmatter",
+    "value": "type: \"[[📍 Location]]\""
+  },
+  "entryTypeTrip": {
+    "mode": "frontmatter",
+    "value": "type: \"[[🚗 Trip]]\""
+  },
+  "dateProperty": "date",
+  "timeProperty": "time",
+  "entryProperty": "entry",
+  "journalProperty": "journal",
+  "journalName": "All Journals",
+  "journalDescription": "",
+  "journalFolder": "70 Journal"
+}
