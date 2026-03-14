@@ -1,6 +1,6 @@
 {
   "name": "obsidian-day-won",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Day Won — Obsidian plugin",
   "main": "main.js",
   "type": "module",
