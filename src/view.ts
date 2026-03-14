@@ -10,6 +10,7 @@ import {
   type JournalEntry,
   type EntryTypeKind,
   getJournalEntries,
+  getOnThisDayEntries,
   groupEntriesByDate,
   groupEntriesByJournal,
   computeStreak,
@@ -282,7 +283,10 @@ export class DayWonView extends ItemView {
     const uniqueDays = new Set(entries.map((e) => e.date)).size;
     const mediaCount = entries.filter((e) => e.firstImagePath).length;
     const now = new Date();
-    const onThisDay = onThisDayCount(entries, now.getMonth() + 1, now.getDate());
+    const month = now.getMonth() + 1;
+    const day = now.getDate();
+    const onThisDayCountNum = onThisDayCount(entries, month, day);
+    const onThisDayEntries = getOnThisDayEntries(entries, month, day);
 
     const stats = container.createDiv("day-won-stats");
     const items = [
@@ -290,12 +294,33 @@ export class DayWonView extends ItemView {
       { label: "ENTRIES", value: String(this.entries.length) },
       { label: "MEDIA", value: String(mediaCount) },
       { label: "DAYS", value: String(uniqueDays) },
-      { label: "ON THIS DAY", value: String(onThisDay) },
+      { label: "ON THIS DAY", value: String(onThisDayCountNum) },
     ];
     for (const { label, value } of items) {
       const block = stats.createDiv("day-won-stat");
       block.createEl("div", "day-won-stat-label").setText(label);
       block.createEl("div", "day-won-stat-value").setText(value);
+    }
+
+    if (onThisDayEntries.length > 0) {
+      const section = container.createDiv("day-won-summary-on-this-day");
+      section.createEl("h2", "day-won-summary-on-this-day-title").setText("On This Day");
+      const list = section.createDiv("day-won-summary-on-this-day-list");
+      for (const entry of onThisDayEntries) {
+        const row = list.createDiv("day-won-summary-on-this-day-entry");
+        if (entry.firstImagePath) {
+          const thumbWrap = row.createDiv("day-won-summary-on-this-day-thumb");
+          const img = document.createElement("img");
+          img.src = this.getImageUrl(entry.firstImagePath);
+          img.alt = "";
+          img.loading = "lazy";
+          thumbWrap.appendChild(img);
+        }
+        const textWrap = row.createDiv("day-won-summary-on-this-day-text");
+        textWrap.createEl("span", "day-won-summary-on-this-day-year").setText(entry.date.slice(0, 4));
+        textWrap.createEl("span", "day-won-summary-on-this-day-name").setText(entry.name);
+        row.addEventListener("click", () => this.openEntry(entry));
+      }
     }
   }
 
@@ -684,9 +709,9 @@ export class DayDetailView extends ItemView {
       return;
     }
 
-    const cardGrid = body.createDiv("day-won-day-card-grid");
+    const cardList = body.createDiv("day-won-day-card-list");
     for (const entry of this.entries) {
-      const card = cardGrid.createDiv("day-won-day-card");
+      const card = cardList.createDiv("day-won-day-card");
       card.addEventListener("click", (e) => {
         if (!(e.target as HTMLElement).closest("a")) {
           this.app.workspace.getLeaf(false).openFile(entry.file);

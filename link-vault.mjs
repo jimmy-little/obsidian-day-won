@@ -36,18 +36,29 @@ async function main() {
     const stat = fs.lstatSync(TARGET);
     if (stat.isSymbolicLink()) {
       const resolved = fs.realpathSync(TARGET);
-      if (resolved === __dirname) {
+      const dirnameReal = fs.realpathSync(__dirname);
+      if (resolved === dirnameReal) {
         console.log("Plugin already linked to vault at:", TARGET);
         return;
       }
       fs.unlinkSync(TARGET);
     } else {
       console.error("Target exists and is not a symlink:", TARGET);
+      console.error("Remove or rename it, then run again.");
       process.exit(1);
     }
   }
 
-  fs.symlinkSync(__dirname, TARGET, "dir");
+  try {
+    fs.symlinkSync(__dirname, TARGET, "dir");
+  } catch (err) {
+    if (err.code === "EEXIST") {
+      fs.unlinkSync(TARGET);
+      fs.symlinkSync(__dirname, TARGET, "dir");
+    } else {
+      throw err;
+    }
+  }
   console.log("Linked plugin to vault:");
   console.log("  ", __dirname, "->", TARGET);
   console.log("\nBuild with: npm run dev (watch) or npm run build");

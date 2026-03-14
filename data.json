@@ -1,5 +1,5 @@
 {
-  "journalFolders": "70 Journal\n60 Logs",
+  "journalFolders": "70 Journal\n60 Logs\n90 Media",
   "journalConfigs": {
     "Dailily": {
       "color": "hsl(98, 55%, 52%)",

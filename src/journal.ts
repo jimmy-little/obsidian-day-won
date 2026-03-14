@@ -83,6 +83,31 @@ export function groupEntriesByJournal(entries: JournalEntry[]): Map<string, Jour
 const IMAGE_MD_REGEX = /!\[([^\]]*)\]\(([^)]+)\)/;
 const IMAGE_WIKILINK_REGEX = /!\[\[([^\]|]+)(?:\|[^\]]*)?\]\]/g;
 
+const IMAGE_EXTENSIONS = new Set([
+  ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico",
+]);
+
+/** Return path only if it points to an actual image file (filters out note embeds like ![[Note]]). */
+function resolveToImagePath(
+  vault: Vault,
+  metadataCache: MetadataCache,
+  sourceFilePath: string,
+  extractedPath: string
+): string | null {
+  const ext = extractedPath.includes(".")
+    ? "." + extractedPath.split(".").pop()!.toLowerCase()
+    : "";
+  if (IMAGE_EXTENSIONS.has(ext)) {
+    const file = vault.getAbstractFileByPath(extractedPath);
+    if (file instanceof TFile) return file.path;
+  }
+  const resolved = metadataCache.getFirstLinkpathDest(extractedPath, sourceFilePath);
+  if (resolved instanceof TFile && IMAGE_EXTENSIONS.has("." + resolved.extension.toLowerCase())) {
+    return resolved.path;
+  }
+  return null;
+}
+
 function getFirstImageFromContent(content: string, file: TFile): string | null {
   const dir = (file.parent && file.parent.path) ? file.parent.path + "/" : "";
 
@@ -137,6 +162,25 @@ function getAllImagePathsFromContent(content: string, file: TFile): string[] {
 }
 
 const WIKILINK_IN_FM_REGEX = /^\[\[([^\]|]+)(?:\|[^\]]*)?\]\]$/;
+
+/** Strip wikilink syntax and leading underscore for display: "[[_Home]]" -> "Home". */
+function stripWikilinkDisplay(s: string): string {
+  if (!s || typeof s !== "string") return s;
+  let t = s.trim();
+  const m = t.match(/^\[\[([^\]|]+)(?:\|[^\]]*)?\]\]$/);
+  if (m) t = m[1].trim();
+  else t = t.replace(/\[\[([^\]|]+)(?:\|[^\]]*)?\]\]/g, "$1").trim();
+  return t.replace(/^_+/, "").trim() || s;
+}
+
+/** Normalize time for display: ISO "2026-03-11T06:53:33" -> "06:53"; "06:53" unchanged. */
+function normalizeTimeForDisplay(raw: string): string {
+  const t = typeof raw === "string" ? raw.trim() : "";
+  if (!t) return t;
+  const iso = t.match(/^\d{4}-\d{2}-\d{2}T(\d{2}:\d{2}(?::\d{2})?)/);
+  if (iso) return iso[1].slice(0, 5);
+  return t;
+}
 
 /** Parse first inline field in content, e.g. "entry:: value" (key is case-sensitive). */
 function getInlineFieldValue(content: string, fieldKey: string): string | null {
@@ -362,12 +406,13 @@ export async function getJournalEntries(
     if (rawDate == null) continue;
     const date = parseDate(rawDate);
     if (!date) continue;
-    const time = (front?.[timeProperty] ?? "") as string;
-    const timeStr = typeof time === "string" ? time : "";
+    const timeRaw =
+      (front?.[timeProperty] ?? front?.startTime ?? "") as string;
+    const timeStr = normalizeTimeForDisplay(typeof timeRaw === "string" ? timeRaw : "");
     const journal = (front?.[journalProperty] ?? "") as string;
     const journalStr = typeof journal === "string" ? journal.trim() : "";
     const entryVal = front?.[entryProperty];
-    const entryName = typeof entryVal === "string" ? entryVal.trim() : "";
+    const entryName = typeof entryVal === "string" ? stripWikilinkDisplay(entryVal.trim()) : "";
     candidates.push({ file, date, timeStr, journal: journalStr, entryName });
   }
 
@@ -376,7 +421,10 @@ export async function getJournalEntries(
     let firstImagePath: string | null = null;
     const cache = metadataCache.getFileCache(file);
     const front = cache?.frontmatter;
-    const frontImg = getFrontmatterImagePath(front, file);
+    const frontImgRaw = getFrontmatterImagePath(front, file);
+    const frontImg = frontImgRaw
+      ? resolveToImagePath(vault, metadataCache, file.path, frontImgRaw)
+      : null;
     if (frontImg) firstImagePath = frontImg;
     const entryType = classifyEntryType(file.path, front, rules);
     let preview = file.basename;
@@ -386,9 +434,15 @@ export async function getJournalEntries(
       const content = await vault.cachedRead(file);
       if (!firstImagePath) {
         const contentImg = getFirstImageFromContent(content, file);
-        if (contentImg) firstImagePath = contentImg;
+        if (contentImg) {
+          const resolved = resolveToImagePath(vault, metadataCache, file.path, contentImg);
+          if (resolved) firstImagePath = resolved;
+        }
       }
-      const fromContent = getAllImagePathsFromContent(content, file);
+      let fromContent = getAllImagePathsFromContent(content, file);
+      fromContent = fromContent
+        .map((p) => resolveToImagePath(vault, metadataCache, file.path, p))
+        .filter((p): p is string => p != null);
       if (frontImg) imagePaths = [frontImg, ...fromContent.filter((p) => p !== frontImg)];
       else imagePaths = fromContent;
       const firstLine = content
@@ -396,7 +450,7 @@ export async function getJournalEntries(
         .find((l) => l.trim().length > 0 && !l.trim().startsWith("#") && !l.trim().startsWith("---"));
       if (firstLine) preview = firstLine.trim().slice(0, 120);
       const inlineEntry = entryProperty ? getInlineFieldValue(content, entryProperty) : null;
-      name = entryName || inlineEntry || preview;
+      name = stripWikilinkDisplay(entryName || inlineEntry || preview);
     } catch {
       // ignore read errors
     }
@@ -469,10 +523,21 @@ function formatDateKey(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+/** Entries that fall on the same month-day (e.g. "on this day"), reverse chronological (newest first). */
+export function getOnThisDayEntries(
+  entries: JournalEntry[],
+  month: number,
+  day: number
+): JournalEntry[] {
+  return entries
+    .filter((e) => {
+      const [_, m, d] = e.date.split("-").map(Number);
+      return m === month && d === day;
+    })
+    .sort((a, b) => b.date.localeCompare(a.date));
+}
+
 /** Number of entries that fall on the same month-day in other years (e.g. "on this day"). */
 export function onThisDayCount(entries: JournalEntry[], month: number, day: number): number {
-  return entries.filter((e) => {
-    const [y, m, d] = e.date.split("-").map(Number);
-    return m === month && d === day;
-  }).length;
+  return getOnThisDayEntries(entries, month, day).length;
 }
