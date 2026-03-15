@@ -22,6 +22,9 @@
   background: var(--day-won-header-bg, var(--day-won-accent));
   color: var(--day-won-header-fg, #1a1a1a);
   padding: 12px 16px 10px;
+  margin: 16px 16px 0;
+  border-radius: 8px;
+  overflow: hidden;
 }
 
 .theme-dark .day-won-header {
@@ -69,6 +72,26 @@
   outline-offset: 2px;
 }
 
+.day-won-add-entry,
+.day-won-refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.12);
+  color: inherit;
+  cursor: pointer;
+  font-size: 1.1rem;
+}
+
+.day-won-add-entry:hover,
+.day-won-refresh:hover {
+  background: rgba(0, 0, 0, 0.18);
+}
 
 .day-won-title {
   margin: 0;
@@ -83,10 +106,7 @@
 
 .day-won-nav {
   display: flex;
-  gap: 4px;
-  background: var(--day-won-bg-secondary);
-  border-radius: 8px;
-  padding: 4px;
+  gap: 8px;
 }
 
 .day-won-tab {
@@ -94,25 +114,30 @@
   align-items: center;
   gap: 6px;
   padding: 8px 12px;
-  border: none;
+  border: 1px solid rgba(255, 255, 255, 0.35);
   border-radius: 6px;
-  background: transparent;
-  color: var(--day-won-text-muted);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--day-won-header-fg, #1a1a1a);
   cursor: pointer;
   font-size: 0.9rem;
+  opacity: 0.75;
+  transition: opacity 0.15s ease, border-color 0.15s ease, background 0.15s ease;
 }
 
 .day-won-tab:hover {
-  color: var(--day-won-text);
+  opacity: 0.9;
 }
 
 .day-won-tab.is-active {
-  background: var(--day-won-header-bg, var(--day-won-accent));
+  opacity: 1;
+  border-color: rgba(255, 255, 255, 0.7);
+  background: rgba(0, 0, 0, 0.2);
   color: var(--day-won-header-fg, #1a1a1a);
 }
 
 .theme-dark .day-won-tab.is-active {
-  background: var(--day-won-header-bg, var(--day-won-accent-dim));
+  border-color: rgba(255, 255, 255, 0.5);
+  background: rgba(0, 0, 0, 0.25);
 }
 
 .day-won-body {
@@ -136,6 +161,295 @@
   margin-top: 1.5rem;
   margin-bottom: 0.5rem;
   font-size: 0.9rem;
+}
+
+.day-won-settings-desc {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin: 0 0 10px;
+}
+
+.day-won-settings-entry-types-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.day-won-settings-entry-type-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.day-won-settings-entry-type-drag {
+  color: var(--text-muted);
+  cursor: grab;
+}
+
+.day-won-settings-entry-type-name {
+  width: 120px;
+  min-width: 80px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  font-size: 0.9rem;
+}
+
+.day-won-settings-entry-type-mode {
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  font-size: 0.9rem;
+  min-width: 100px;
+}
+
+.day-won-settings-entry-type-value {
+  flex: 1;
+  min-width: 140px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  font-size: 0.9rem;
+}
+
+.day-won-settings-entry-type-icon-wrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.day-won-settings-entry-type-icon-preview {
+  color: var(--text-muted);
+  font-size: 1.1rem;
+}
+
+.day-won-settings-entry-type-icon-btn {
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.day-won-settings-entry-type-icon-btn:hover {
+  background: var(--background-modifier-hover);
+}
+
+.day-won-settings-entry-type-move {
+  padding: 4px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.day-won-settings-entry-type-move:hover:not(:disabled) {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+.day-won-settings-entry-type-move:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.day-won-settings-entry-type-remove {
+  padding: 4px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.day-won-settings-entry-type-remove:hover {
+  color: var(--text-error);
+  background: var(--background-modifier-hover);
+}
+
+.day-won-settings-entry-types-actions {
+  margin-bottom: 1rem;
+}
+
+/* New entry modal */
+.day-won-new-entry-modal {
+  min-height: 480px;
+}
+
+.day-won-new-entry-modal .day-won-modal-field {
+  margin-bottom: 1.25rem;
+}
+
+.day-won-new-entry-modal .day-won-modal-field:last-of-type {
+  margin-bottom: 0;
+}
+
+.day-won-new-entry-modal label {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-normal);
+  margin-bottom: 2px;
+}
+
+.day-won-new-entry-modal .day-won-modal-input,
+.day-won-new-entry-modal .day-won-modal-select {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  font-size: 0.95rem;
+  box-sizing: border-box;
+}
+
+.day-won-new-entry-modal .day-won-modal-journal-select {
+  min-width: 10em;
+  width: 100%;
+  appearance: auto;
+}
+
+.day-won-new-entry-modal .day-won-modal-tags-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.day-won-new-entry-modal .day-won-modal-tag-suggest {
+  margin-top: 4px;
+  height: 0;
+  overflow: hidden;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  line-height: 1.4;
+  font-size: 0.9rem;
+}
+
+/* Exactly 8 lines: line-height 1.4 * 0.9rem + 12px padding per row */
+.day-won-new-entry-modal .day-won-modal-tag-suggest:not(.is-hidden) {
+  height: 10.5rem;
+  max-height: 10.5rem;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.day-won-new-entry-modal .day-won-modal-tag-suggest.is-hidden {
+  display: block;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.day-won-new-entry-modal .day-won-modal-tag-suggest-item {
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: var(--text-normal);
+  line-height: 1.4;
+}
+
+.day-won-new-entry-modal .day-won-modal-tag-suggest-item:hover,
+.day-won-new-entry-modal .day-won-modal-tag-suggest-item.is-selected {
+  background: var(--background-modifier-hover);
+  color: var(--interactive-accent);
+}
+
+.day-won-new-entry-modal .day-won-modal-media-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.day-won-new-entry-modal .day-won-modal-add-media {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary-alt);
+  color: var(--text-normal);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.day-won-new-entry-modal .day-won-modal-add-media:hover {
+  background: var(--background-modifier-hover);
+}
+
+.day-won-new-entry-modal .day-won-modal-media-preview {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.day-won-new-entry-modal .day-won-modal-media-clear {
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.day-won-new-entry-modal .day-won-modal-media-clear:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+.day-won-new-entry-modal .day-won-modal-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 1.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+/* Icon picker modal */
+.day-won-icon-picker-search {
+  width: 100%;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  font-size: 0.95rem;
+}
+
+.day-won-icon-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(40px, 1fr));
+  gap: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.day-won-icon-picker-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text-muted);
+}
+
+.day-won-icon-picker-cell:hover,
+.day-won-icon-picker-cell.is-selected {
+  background: var(--background-modifier-hover);
+  color: var(--interactive-accent);
+}
+
+.day-won-icon-picker-icon {
+  font-size: 1.25rem;
 }
 
 /* Summary */
@@ -248,11 +562,11 @@
 .day-won-list {
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  gap: 0;
 }
 
 .day-won-list-journal-section {
-  margin-bottom: 1.5rem;
+  margin-bottom: 1rem;
 }
 
 .day-won-list-journal-title {
@@ -260,47 +574,116 @@
   font-weight: 700;
   color: var(--day-won-text);
   margin: 0 0 0.75rem;
-  padding-bottom: 4px;
-  border-bottom: 1px solid var(--day-won-border);
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--day-won-card-bg, var(--day-won-bg-secondary));
+}
+
+.theme-light .day-won-list-journal-title {
+  background: var(--day-won-card-bg, #f5f5f7);
+}
+
+.theme-dark .day-won-list-journal-title {
+  background: var(--day-won-card-bg, rgba(255, 255, 255, 0.06));
 }
 
 .day-won-list-year-title {
   font-size: 1rem;
   font-weight: 600;
   color: var(--day-won-text-muted);
-  margin: 1rem 0 0.35rem;
+  margin: 1rem 0 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--background-primary);
+}
+
+.day-won-list-year-title:first-child {
+  margin-top: -16px;
+  padding-top: calc(8px + 16px);
+}
+
+.day-won-list-journal-section:first-child > .day-won-list-year-title:first-child {
+  margin-top: -16px;
+  padding-top: calc(8px + 16px);
 }
 
 .day-won-list-month-title {
   font-size: 0.9rem;
   font-weight: 600;
   color: var(--day-won-text-muted);
-  margin: 0.75rem 0 0.25rem;
+  margin: 2px 0 0;
+  padding: 6px 12px;
+  border-radius: 8px;
+  width: 100%;
+  box-sizing: border-box;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--background-primary);
 }
 
-.day-won-list-day-header {
-  font-size: 0.75rem;
+.day-won-list-day-group {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding-bottom: 0;
+  border-bottom: 2px solid var(--day-won-border);
+}
+
+.day-won-list-day-group:last-child {
+  border-bottom-width: 0;
+}
+
+.day-won-list-day-header-wrap {
+  flex-shrink: 0;
+  width: 44px;
+  text-align: center;
+  padding-top: 8px;
+}
+
+.day-won-list-day-weekday {
+  font-size: 0.7rem;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.03em;
   color: var(--day-won-text-muted);
-  margin: 10px 0 4px;
+  line-height: 1.2;
+}
+
+.day-won-list-day-num {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--day-won-text);
+  line-height: 1.2;
+  margin-top: 2px;
+}
+
+.day-won-list-day-entries {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .day-won-list-entry {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding: 10px 12px;
-  margin: 4px 0;
-  border-radius: 8px;
+  padding: 10px 0;
   cursor: pointer;
-  background: var(--day-won-bg-secondary);
-  border: 1px solid transparent;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--day-won-border);
+  border-radius: 0;
+}
+
+.day-won-list-entry:last-child {
+  border-bottom: none;
 }
 
 .day-won-list-entry:hover {
-  border-color: var(--day-won-border);
   background: var(--background-modifier-hover);
 }
 
@@ -319,14 +702,29 @@
   align-items: flex-start;
 }
 
-.day-won-list-preview {
+.day-won-list-text {
   flex: 1;
-  font-size: 0.9rem;
+  min-width: 0;
+}
+
+.day-won-list-title {
+  font-size: 0.95rem;
+  font-weight: 600;
   color: var(--day-won-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.day-won-list-snippet {
+  font-size: 0.82rem;
+  color: var(--day-won-text-muted);
+  margin-top: 2px;
   overflow: hidden;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
+  line-height: 1.35;
 }
 
 .day-won-list-thumb {
@@ -342,6 +740,86 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.day-won-list-thumb-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--day-won-border);
+}
+
+.day-won-list-thumb-icon .day-won-list-entry-icon {
+  color: var(--day-won-entry-icon-color, var(--day-won-text-muted));
+  font-size: 1.25rem;
+}
+
+/* Day-One style image grid (calendar + list) */
+.day-won-image-grid {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: inherit;
+}
+
+.day-won-image-grid-full {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+}
+
+.day-won-image-grid-split2 {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+
+.day-won-image-grid-4 {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+
+.day-won-image-grid-cell {
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 0;
+}
+
+.day-won-image-grid-cell img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.day-won-image-grid-cell-icon {
+  background: var(--day-won-bg-secondary);
+  color: var(--text-muted);
+}
+
+.day-won-image-grid-cell-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* Calendar: grid fills cell behind day-num and dots */
+.day-won-calendar-cell-day .day-won-image-grid {
+  position: absolute;
+  inset: 0;
+  border-radius: 6px;
+}
+
+/* List: thumb stays 48x48, grid inside */
+.day-won-list-thumb-grid.day-won-list-thumb {
+  padding: 0;
+  display: grid;
+}
+
+.day-won-list-thumb-grid .day-won-image-grid-cell-icon svg {
+  width: 16px;
+  height: 16px;
 }
 
 /* Calendar */
@@ -405,9 +883,10 @@
   position: relative;
   cursor: default;
   flex-direction: column;
-  justify-content: flex-start;
-  padding-top: 4px;
-  padding-bottom: 4px;
+  justify-content: center;
+  align-items: center;
+  padding: 4px;
+  gap: 4px;
 }
 
 .day-won-calendar-cell-day.is-today {
@@ -426,8 +905,6 @@
   gap: 2px;
   justify-content: center;
   align-items: center;
-  margin-top: auto;
-  margin-bottom: 0;
   min-height: 6px;
   position: relative;
   z-index: 1;
@@ -450,9 +927,11 @@
   z-index: 1;
   background: rgba(0, 0, 0, 0.5);
   color: #fff;
-  padding: 2px 6px;
+  padding: 3px 8px;
   border-radius: 4px;
-  font-weight: 600;
+  font-weight: 700;
+  font-size: 1.1rem;
+  line-height: 1.2;
 }
 
 .day-won-calendar-cell-day:not(.has-entries) .day-won-calendar-day-num {
@@ -602,7 +1081,7 @@
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
 }
 
-/* Card header: cover image only */
+/* Card header: cover image only (taller height) */
 .day-won-day-card-header {
   flex-shrink: 0;
   position: relative;
@@ -613,10 +1092,10 @@
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
-  min-height: 140px;
+  min-height: 200px;
 }
 
-/* Card body: row with floated-left icon + text (Day One style) */
+/* Card body: row with icon + text (Day One style) */
 .day-won-day-card-body {
   padding: 12px 14px;
   flex: 1;
@@ -645,7 +1124,7 @@
 .day-won-day-card-icon-wrap .day-won-day-card-icon {
   width: 28px;
   height: 28px;
-  color: inherit;
+  color: var(--day-won-entry-icon-color, var(--day-won-text-muted));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -670,6 +1149,14 @@
   color: #ff9800;
 }
 
+.day-won-day-card-icon-wrap.day-won-day-type-lapse {
+  color: #9c27b0;
+}
+
+.day-won-day-card-icon-wrap.day-won-day-type-media {
+  color: #e91e63;
+}
+
 .day-won-day-card-text {
   flex: 1;
   min-width: 0;
@@ -692,7 +1179,17 @@
   -webkit-box-orient: vertical;
 }
 
-/* Body images inside card (tiled, not the cover) */
+.day-won-day-card-media-subtitle {
+  font-size: 0.8rem;
+  color: var(--day-won-text-muted);
+  margin-top: 4px;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Body images inside card (dynamic grid, tiled) */
 .day-won-day-card-images {
   display: grid;
   gap: 4px;
@@ -703,6 +1200,11 @@
 
 .day-won-day-card-images[data-count="1"] {
   grid-template-columns: 1fr;
+  max-height: 280px;
+}
+
+.day-won-day-card-images[data-count="1"] .day-won-day-card-image-cell {
+  max-height: 280px;
 }
 
 .day-won-day-card-images[data-count="2"],

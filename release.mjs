@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 /**
  * Release script: bump patch version, build, tag, push, and create GitHub release
- * with Obsidian plugin assets (manifest.json, main.js, styles.css, versions.json).
+ * with Obsidian plugin assets (manifest.json, main.js, styles.css, versions.json)
+ * plus a single plugin zip (some installers/BRAT on mobile may use the zip instead of Source code).
  *
  * Prerequisites: gh CLI (brew install gh), clean working tree, and gh auth login.
  */
 
-import { readFileSync, writeFileSync } from "fs";
+import { readFileSync, writeFileSync, unlinkSync, existsSync } from "fs";
 import { execSync, execFileSync } from "child_process";
 
 const MANIFEST_PATH = "manifest.json";
@@ -48,8 +49,8 @@ writeFileSync(PACKAGE_PATH, JSON.stringify(pkg, null, 2));
 console.log("Building...");
 run("npm run build");
 
-// 5. Git: add, commit, tag
-const tag = `v${newVersion}`;
+// 5. Git: add, commit, tag (tag = raw version for BRAT: it looks up release by manifest version, no "v" prefix)
+const tag = newVersion;
 run(`git add ${MANIFEST_PATH} ${VERSIONS_PATH} ${PACKAGE_PATH}`);
 run(`git commit -m "Release ${tag}"`);
 run(`git tag ${tag}`);
@@ -59,17 +60,32 @@ console.log("Pushing to origin...");
 run("git push");
 run("git push origin --tags");
 
-// 7. Create GitHub release and attach Obsidian plugin files
+// 7. Create a single plugin zip (root contains main.js, manifest.json, styles.css, versions.json)
+//    so installers that prefer one zip (e.g. BRAT on mobile) get the built files, not Source code.
+const zipName = `day-won-${tag}.zip`;
+try {
+  execSync(`zip -j ${zipName} ${ASSETS.join(" ")}`, { stdio: "inherit" });
+} catch (e) {
+  console.warn("zip command failed (optional); release will still have individual assets.", e.message);
+}
+
+// 8. Create GitHub release and attach Obsidian plugin files + plugin zip
 console.log(`Creating release ${tag}...`);
+const releaseAssets = existsSync(zipName) ? [...ASSETS, zipName] : ASSETS;
 execFileSync("gh", [
   "release",
   "create",
   tag,
-  ...ASSETS,
+  ...releaseAssets,
   "--title",
   tag,
   "--notes",
   `Release ${tag}`,
 ], { stdio: "inherit" });
 
+if (existsSync(zipName)) {
+  try { unlinkSync(zipName); } catch (_) {}
+}
+
 console.log(`Done. Release ${tag} is live.`);
+console.log("BRAT: install by picking a version from the list (tag matches manifest version).");

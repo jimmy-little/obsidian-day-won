@@ -4,11 +4,16 @@ import {
   TFile,
   Modal,
   setIcon,
+  App,
+  getAllTags,
 } from "obsidian";
 import type DayWonPlugin from "./main";
+
+/** Must match PLUGIN_ICON in main.ts (open book). */
+const VIEW_ICON = "book-open";
 import {
   type JournalEntry,
-  type EntryTypeKind,
+  type EntryTypeRuleShape,
   getJournalEntries,
   getOnThisDayEntries,
   groupEntriesByDate,
@@ -18,6 +23,414 @@ import {
   parseFolderList,
   getDefaultJournalColor,
 } from "./journal";
+import type { UserEntryType } from "./settings";
+
+function entryTypesToRuleShape(list: UserEntryType[] | undefined): EntryTypeRuleShape[] {
+  if (!list?.length) return [];
+  return list.map((t) => ({ name: t.name, mode: t.mode, value: t.value }));
+}
+
+/** Format a path template with moment-style date variables. */
+function formatPathWithDate(template: string, date: Date): string {
+  const YYYY = date.getFullYear();
+  const M = date.getMonth() + 1;
+  const D = date.getDate();
+  const H = date.getHours();
+  const m = date.getMinutes();
+  const s = date.getSeconds();
+  const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  const monthShort = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  const dayShort = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  return template
+    .replace(/\{YYYY\}/g, String(YYYY))
+    .replace(/\{MM\}/g, String(M).padStart(2, "0"))
+    .replace(/\{M\}/g, String(M))
+    .replace(/\{DD\}/g, String(D).padStart(2, "0"))
+    .replace(/\{D\}/g, String(D))
+    .replace(/\{HH\}/g, String(H).padStart(2, "0"))
+    .replace(/\{mm\}/g, String(m).padStart(2, "0"))
+    .replace(/\{ss\}/g, String(s).padStart(2, "0"))
+    .replace(/\{MMMM\}/g, monthNames[date.getMonth()])
+    .replace(/\{MMM\}/g, monthShort[date.getMonth()])
+    .replace(/\{dddd\}/g, dayNames[date.getDay()])
+    .replace(/\{ddd\}/g, dayShort[date.getDay()]);
+}
+
+/** Sanitize a string for use as a filename: strip illegal chars, trim, max 256 chars. */
+function sanitizeFilename(thought: string): string {
+  const illegal = /[\\/:*?"<>|\x00-\x1f]/g;
+  const trimmed = thought.trim().replace(illegal, "").replace(/\s+/g, " ") || "entry";
+  return trimmed.slice(0, 256);
+}
+
+/** Return file extension for image file name, or .png as fallback. */
+function getImageExtension(fileName: string): string {
+  const match = fileName.match(/\.(png|jpe?g|gif|webp|bmp|svg|ico)$/i);
+  return match ? "." + match[1]!.toLowerCase() : ".png";
+}
+
+/** Parse tags string (e.g. "#a #b" or "a, b") into array of tag strings without #. */
+function parseTagsInput(raw: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const part of raw.split(/[\s,#]+/)) {
+    const t = part.replace(/^#+/, "").trim();
+    if (t && !seen.has(t)) {
+      seen.add(t);
+      out.push(t);
+    }
+  }
+  return out;
+}
+
+/**
+ * Day-One style image grid slots.
+ * 1 image → [path] (full)
+ * 2 images → [path, path] (vertical split)
+ * 3 images → [path, path, path, null] (grid of 4, 4th = icon)
+ * 4+ images → first 4 paths (grid of 4)
+ */
+function getImageGridSlots(paths: string[]): (string | null)[] {
+  if (paths.length === 0) return [];
+  if (paths.length === 1) return [paths[0]!];
+  if (paths.length === 2) return [paths[0]!, paths[1]!];
+  if (paths.length === 3) return [paths[0]!, paths[1]!, paths[2]!, null];
+  return [paths[0]!, paths[1]!, paths[2]!, paths[3]!];
+}
+
+/** New entry modal: Thought, Journal, Date/Time, Tags (with tag suggest). */
+class NewEntryModal extends Modal {
+  private thought = "";
+  private journal = "";
+  private dateTime = new Date();
+  private tags = "";
+  private journalNames: string[] = [];
+  private defaultJournal: string | null = null;
+  private onCreated: (() => void) | null = null;
+  private tagSuggestEl: HTMLElement | null = null;
+  private tagSuggestSelected = 0;
+  private tagSuggestItems: string[] = [];
+  private selectedFiles: File[] = [];
+  private fileInputEl: HTMLInputElement | null = null;
+  private mediaPreviewEl: HTMLElement | null = null;
+
+  constructor(
+    app: App,
+    private plugin: DayWonPlugin,
+    opts: {
+      journalNames: string[];
+      defaultJournal: string | null;
+      onCreated: () => void;
+    }
+  ) {
+    super(app);
+    this.journalNames = opts.journalNames;
+    this.defaultJournal = opts.defaultJournal;
+    this.onCreated = opts.onCreated;
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    this.selectedFiles = [];
+    contentEl.addClass("day-won-new-entry-modal");
+    contentEl.createEl("h2", { text: "New journal entry" });
+
+    const thoughtWrap = contentEl.createDiv("day-won-modal-field");
+    thoughtWrap.createEl("label", { text: "Thought" }).setAttribute("for", "day-won-thought");
+    const thoughtInput = thoughtWrap.createEl("input", {
+      type: "text",
+      cls: "day-won-modal-input",
+    }) as HTMLInputElement;
+    thoughtInput.id = "day-won-thought";
+    thoughtInput.placeholder = "What's on your mind?";
+    thoughtInput.value = this.thought;
+
+    const journalWrap = contentEl.createDiv("day-won-modal-field");
+    journalWrap.createEl("label", { text: "Journal" }).setAttribute("for", "day-won-journal");
+    const journalSelect = journalWrap.createEl("select", { cls: "day-won-modal-select day-won-modal-journal-select" }) as HTMLSelectElement;
+    journalSelect.id = "day-won-journal";
+    const options = this.journalNames.filter((n) => n !== "All");
+    if (options.length === 0) options.push("Default");
+    for (const name of options) {
+      const opt = journalSelect.createEl("option", { value: name });
+      opt.setText(name);
+    }
+    journalSelect.value =
+      this.defaultJournal && options.includes(this.defaultJournal) ? this.defaultJournal : options[0]!;
+
+    const dateWrap = contentEl.createDiv("day-won-modal-field");
+    dateWrap.createEl("label", { text: "Date / Time" }).setAttribute("for", "day-won-datetime");
+    const dateInput = dateWrap.createEl("input", {
+      type: "datetime-local",
+      cls: "day-won-modal-input",
+    }) as HTMLInputElement;
+    dateInput.id = "day-won-datetime";
+    const now = new Date();
+    dateInput.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}T${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+
+    const tagsWrap = contentEl.createDiv("day-won-modal-field");
+    tagsWrap.createEl("label", { text: "Tags" }).setAttribute("for", "day-won-tags");
+    const tagsContainer = tagsWrap.createDiv("day-won-modal-tags-wrap");
+    const tagsInput = tagsContainer.createEl("input", {
+      type: "text",
+      cls: "day-won-modal-input",
+    }) as HTMLInputElement;
+    tagsInput.id = "day-won-tags";
+    tagsInput.placeholder = "e.g. #daily #gratitude (type # for suggestions)";
+    tagsInput.value = this.tags;
+    this.tagSuggestEl = tagsContainer.createDiv("day-won-modal-tag-suggest");
+    this.tagSuggestEl.addClass("is-hidden");
+    tagsInput.addEventListener("input", () => this.onTagsInput(tagsInput));
+    tagsInput.addEventListener("keydown", (e) => this.onTagsKeydown(e, tagsInput));
+    tagsInput.addEventListener("focus", () => this.onTagsInput(tagsInput));
+    tagsInput.addEventListener("blur", () => {
+      setTimeout(() => this.hideTagSuggest(), 150);
+    });
+
+    const mediaWrap = contentEl.createDiv("day-won-modal-field");
+    mediaWrap.createEl("label", { text: "Attachments" });
+    const mediaRow = mediaWrap.createDiv("day-won-modal-media-row");
+    this.fileInputEl = mediaRow.createEl("input", {
+      type: "file",
+      cls: "day-won-modal-file-input",
+    }) as HTMLInputElement;
+    this.fileInputEl.setAttribute("accept", "image/*");
+    this.fileInputEl.setAttribute("multiple", "true");
+    this.fileInputEl.style.display = "none";
+    const addMediaBtn = mediaRow.createEl("button", { type: "button", cls: "day-won-modal-add-media" });
+    setIcon(addMediaBtn, "image-plus");
+    addMediaBtn.setText("Add images");
+    addMediaBtn.addEventListener("click", () => this.fileInputEl?.click());
+    this.fileInputEl.addEventListener("change", () => {
+      const files = this.fileInputEl?.files;
+      if (files?.length) {
+        this.selectedFiles = [...this.selectedFiles, ...Array.from(files)];
+        this.updateMediaPreview();
+      }
+      if (this.fileInputEl) this.fileInputEl.value = "";
+    });
+    this.mediaPreviewEl = mediaRow.createDiv("day-won-modal-media-preview");
+
+    const actions = contentEl.createDiv("day-won-modal-actions");
+    const submitBtn = actions.createEl("button", { type: "button", cls: "mod-cta" });
+    submitBtn.setText("Create entry");
+    const cancelBtn = actions.createEl("button", { type: "button" });
+    cancelBtn.setText("Cancel");
+
+    submitBtn.addEventListener("click", () => {
+      this.thought = thoughtInput.value.trim();
+      this.journal = journalSelect.value;
+      this.dateTime = new Date(dateInput.value || Date.now());
+      this.tags = tagsInput.value.trim();
+      const files = [...this.selectedFiles];
+      this.createEntry(files);
+      this.close();
+    });
+    cancelBtn.addEventListener("click", () => this.close());
+  }
+
+  private getTagSuggestions(prefix: string): string[] {
+    const tagSet = new Set<string>();
+    for (const file of this.app.vault.getMarkdownFiles()) {
+      const cache = this.app.metadataCache.getFileCache(file);
+      if (!cache) continue;
+      const tags = getAllTags(cache);
+      if (tags) for (const t of tags) tagSet.add(t.replace(/^#/, ""));
+    }
+    const list = [...tagSet].filter((t) => !prefix || t.toLowerCase().includes(prefix.toLowerCase()));
+    return list.slice(0, 20);
+  }
+
+  private onTagsInput(input: HTMLInputElement) {
+    const val = input.value;
+    const cursor = input.selectionStart ?? val.length;
+    const before = val.slice(0, cursor);
+    const hashIdx = before.lastIndexOf("#");
+    if (hashIdx === -1) {
+      this.hideTagSuggest();
+      return;
+    }
+    const prefix = before.slice(hashIdx + 1).trim();
+    this.tagSuggestItems = this.getTagSuggestions(prefix);
+    if (this.tagSuggestItems.length === 0) {
+      this.hideTagSuggest();
+      return;
+    }
+    this.tagSuggestSelected = 0;
+    this.showTagSuggest(input, prefix);
+  }
+
+  private showTagSuggest(input: HTMLInputElement, prefix: string) {
+    if (!this.tagSuggestEl) return;
+    this.tagSuggestEl.empty();
+    this.tagSuggestEl.removeClass("is-hidden");
+    for (let i = 0; i < this.tagSuggestItems.length; i++) {
+      const tag = this.tagSuggestItems[i]!;
+      const row = this.tagSuggestEl.createDiv("day-won-modal-tag-suggest-item");
+      if (i === this.tagSuggestSelected) row.addClass("is-selected");
+      row.setText(`#${tag}`);
+      row.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        this.insertTag(input, tag);
+      });
+    }
+  }
+
+  private refreshTagSuggestHighlight() {
+    if (!this.tagSuggestEl) return;
+    const items = this.tagSuggestEl.querySelectorAll(".day-won-modal-tag-suggest-item");
+    items.forEach((el, i) => el.classList.toggle("is-selected", i === this.tagSuggestSelected));
+  }
+
+  private hideTagSuggest() {
+    if (this.tagSuggestEl) {
+      this.tagSuggestEl.addClass("is-hidden");
+      this.tagSuggestEl.empty();
+    }
+    this.tagSuggestItems = [];
+  }
+
+  private insertTag(input: HTMLInputElement, tag: string) {
+    const val = input.value;
+    const cursor = input.selectionStart ?? val.length;
+    const before = val.slice(0, cursor);
+    const hashIdx = before.lastIndexOf("#");
+    const start = hashIdx >= 0 ? hashIdx : cursor;
+    const newVal = val.slice(0, start) + "#" + tag + " " + val.slice(cursor);
+    input.value = newVal;
+    input.setSelectionRange(start + tag.length + 2, start + tag.length + 2);
+    input.focus();
+    this.hideTagSuggest();
+  }
+
+  private updateMediaPreview() {
+    if (!this.mediaPreviewEl) return;
+    this.mediaPreviewEl.empty();
+    if (this.selectedFiles.length === 0) return;
+    const text = this.mediaPreviewEl.createSpan("day-won-modal-media-count");
+    text.setText(`${this.selectedFiles.length} image${this.selectedFiles.length === 1 ? "" : "s"} selected`);
+    const clearBtn = this.mediaPreviewEl.createEl("button", { type: "button", cls: "day-won-modal-media-clear" });
+    clearBtn.setText("Clear");
+    clearBtn.addEventListener("click", () => {
+      this.selectedFiles = [];
+      this.updateMediaPreview();
+    });
+  }
+
+  private onTagsKeydown(e: KeyboardEvent, input: HTMLInputElement) {
+    if (!this.tagSuggestEl?.hasClass("is-hidden") && this.tagSuggestItems.length > 0) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        this.tagSuggestSelected = Math.min(this.tagSuggestSelected + 1, this.tagSuggestItems.length - 1);
+        this.refreshTagSuggestHighlight();
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        this.tagSuggestSelected = Math.max(0, this.tagSuggestSelected - 1);
+        this.refreshTagSuggestHighlight();
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        const tag = this.tagSuggestItems[this.tagSuggestSelected];
+        if (tag) this.insertTag(input, tag);
+        return;
+      }
+      if (e.key === "Escape") {
+        this.hideTagSuggest();
+      }
+    }
+  }
+
+  private async createEntry(selectedFiles: File[]) {
+    const s = this.plugin.settings;
+    const dateProp = s.dateProperty || "date";
+    const journalProp = s.journalProperty || "journal";
+    const entryProp = s.entryProperty || "entry";
+    const template = s.defaultJournalEntryLocation?.trim() || "Journal/{YYYY}/{MM}-{MMMM}";
+    const dir = formatPathWithDate(template, this.dateTime);
+    const title = sanitizeFilename(this.thought);
+    const mode = s.attachmentMode ?? "subfolder";
+    const filename =
+      mode === "subfolder"
+        ? `${dir}/${title}/${title}.md`.replace(/\/+/g, "/")
+        : `${dir}/${title}.md`.replace(/\/+/g, "/");
+    const tagsArr = parseTagsInput(this.tags);
+    const timeStr = this.dateTime.toTimeString().slice(0, 5);
+    const frontmatter: Record<string, unknown> = {
+      [dateProp]: this.dateTime.toISOString().slice(0, 10),
+      [journalProp]: this.journal,
+      [entryProp]: this.thought || title,
+    };
+    if (s.timeProperty) frontmatter[s.timeProperty] = timeStr;
+    if (tagsArr.length > 0) frontmatter.tags = tagsArr;
+    const fmBlock =
+      "---\n" +
+      Object.entries(frontmatter)
+        .map(([k, v]) => {
+          if (Array.isArray(v)) {
+            const items = (v as string[]).map((x) => (x.includes(" ") || x.includes(",") ? `"${x}"` : x));
+            return `${k}: [${items.join(", ")}]`;
+          }
+          return `${k}: ${v}`;
+        })
+        .join("\n") +
+      "\n---\n\n";
+
+    let body = this.thought ? `${this.thought}\n\n` : "";
+    const imageLinks: string[] = [];
+
+    const noteDir = mode === "subfolder" ? `${dir}/${title}`.replace(/\/+$/, "") : dir.replace(/\/+$/, "");
+    const noteDirParts = noteDir.split("/").filter(Boolean);
+    for (let i = 1; i <= noteDirParts.length; i++) {
+      const p = noteDirParts.slice(0, i).join("/");
+      if (p) await this.app.vault.adapter.mkdir(p);
+    }
+
+    if (selectedFiles.length > 0) {
+      let attachmentDir: string;
+      if (mode === "subfolder") {
+        attachmentDir = noteDir;
+      } else {
+        const assetsTemplate = s.assetsFolderPath?.trim() || "Assets/{YYYY}/{MM}-{MMMM}";
+        attachmentDir = formatPathWithDate(assetsTemplate, this.dateTime).replace(/\/+$/, "");
+        const attachmentParts = attachmentDir.split("/").filter(Boolean);
+        for (let i = 1; i <= attachmentParts.length; i++) {
+          const p = attachmentParts.slice(0, i).join("/");
+          if (p) await this.app.vault.adapter.mkdir(p);
+        }
+      }
+      const usedNames = new Map<string, number>();
+      for (const file of selectedFiles) {
+        const ext = getImageExtension(file.name) || ".png";
+        const base = sanitizeFilename(file.name.replace(/\.[^.]+$/, "")).slice(0, 80) || "image";
+        let name = base + ext;
+        const count = (usedNames.get(base) ?? 0) + 1;
+        usedNames.set(base, count);
+        if (count > 1) name = `${base}-${count}${ext}`;
+        const imagePath = `${attachmentDir}/${name}`.replace(/\/+/g, "/");
+        const arrayBuffer = await file.arrayBuffer();
+        await this.app.vault.createBinary(imagePath, arrayBuffer);
+        imageLinks.push(imagePath);
+      }
+      for (const imagePath of imageLinks) {
+        body += `![[${imagePath}]]\n\n`;
+      }
+    }
+
+    const content = fmBlock + body;
+    const created = await this.app.vault.create(filename, content);
+    if (this.onCreated) this.onCreated();
+    this.app.workspace.getLeaf().openFile(created);
+  }
+
+  onClose() {
+    this.contentEl.empty();
+  }
+}
 
 export const VIEW_TYPE_DAY_WON = "day-won-view";
 export const VIEW_TYPE_DAY_WON_DAY = "day-won-day-view";
@@ -83,7 +496,7 @@ export class DayWonView extends ItemView {
   }
 
   getIcon(): string {
-    return "book-open";
+    return VIEW_ICON;
   }
 
   private activeTab: TabId = "calendar";
@@ -113,8 +526,9 @@ export class DayWonView extends ItemView {
     return this.entries.filter((e) => (e.journal || "Default") === this.selectedJournal);
   }
 
-  /** Resolve image path to a URL (exact path, then by filename anywhere in vault, then adapter). */
+  /** Resolve image path to a URL (external URLs as-is; vault paths resolved). */
   private getImageUrl(path: string): string {
+    if (path.startsWith("http://") || path.startsWith("https://")) return path;
     const file = this.app.vault.getAbstractFileByPath(path);
     if (file instanceof TFile) return this.app.vault.getResourcePath(file);
     for (const ext of ["", ".png", ".jpg", ".jpeg", ".webp", ".gif"]) {
@@ -125,6 +539,35 @@ export class DayWonView extends ItemView {
     const found = this.app.vault.getFiles().find((f) => f.name === filename);
     if (found) return this.app.vault.getResourcePath(found);
     return this.app.vault.adapter.getResourcePath(path);
+  }
+
+  /** Render Day-One style image grid into parent. slots from getImageGridSlots(); iconForEmpty used for 4th cell when 3 images. */
+  private renderImageGrid(
+    parent: HTMLElement,
+    slots: (string | null)[],
+    iconForEmpty: string
+  ): void {
+    if (slots.length === 0) return;
+    const grid = parent.createDiv("day-won-image-grid");
+    const count = slots.length;
+    grid.classList.add(
+      count === 1 ? "day-won-image-grid-full" :
+      count === 2 ? "day-won-image-grid-split2" :
+      "day-won-image-grid-4"
+    );
+    for (const slot of slots) {
+      const cell = grid.createDiv("day-won-image-grid-cell");
+      if (slot) {
+        const img = document.createElement("img");
+        img.src = this.getImageUrl(slot);
+        img.alt = "";
+        img.loading = "lazy";
+        cell.appendChild(img);
+      } else {
+        cell.addClass("day-won-image-grid-cell-icon");
+        setIcon(cell.createSpan(), iconForEmpty);
+      }
+    }
   }
 
   /** Journal color for calendar dots/borders (from config or default). */
@@ -180,11 +623,8 @@ export class DayWonView extends ItemView {
         s.timeProperty || "",
         s.entryProperty || "entry",
         s.journalProperty || "journal",
-        {
-          workout: s.entryTypeWorkout ?? { mode: "", value: "" },
-          location: s.entryTypeLocation ?? { mode: "", value: "" },
-          trip: s.entryTypeTrip ?? { mode: "", value: "" },
-        }
+        entryTypesToRuleShape(this.plugin.settings.entryTypes),
+        this.plugin.settings.lapseEntriesProperty ?? "lapseEntries"
       );
     } catch (e) {
       this.error = e instanceof Error ? e.message : String(e);
@@ -228,6 +668,18 @@ export class DayWonView extends ItemView {
       const v = picker.value;
       this.selectedJournal = v === "All" ? null : v;
       this.render();
+    });
+
+    const addBtn = headerRow.createEl("button", "day-won-add-entry");
+    addBtn.setAttribute("aria-label", "New journal entry");
+    setIcon(addBtn, "plus");
+    addBtn.addEventListener("click", () => {
+      const modal = new NewEntryModal(this.app, this.plugin, {
+        journalNames: this.getJournalNames().filter((n) => n !== "All"),
+        defaultJournal: this.selectedJournal && this.selectedJournal !== "All" ? this.selectedJournal : null,
+        onCreated: () => this.refresh(),
+      });
+      modal.open();
     });
 
     const refreshBtn = headerRow.createEl("button", "day-won-refresh");
@@ -325,22 +777,82 @@ export class DayWonView extends ItemView {
   }
 
   private renderList(container: HTMLElement, entries: JournalEntry[]) {
+    const listEl = container.createDiv("day-won-list");
+    const isAll = this.selectedJournal === null || this.selectedJournal === "All";
+
+    if (isAll) {
+      const byDate = groupEntriesByDate(entries);
+      const dateKeys = [...byDate.keys()].sort((a, b) => b.localeCompare(a));
+      let lastYear = "";
+      let lastMonth = "";
+      for (const dateKey of dateKeys) {
+        const dayEntries = byDate.get(dateKey) ?? [];
+        const [y, m, d] = dateKey.split("-").map(Number);
+        const year = String(y);
+        const monthKey = `${y}-${String(m).padStart(2, "0")}`;
+        if (year !== lastYear) {
+          lastYear = year;
+          listEl.createEl("h3", "day-won-list-year-title").setText(year);
+        }
+        if (monthKey !== lastMonth) {
+          lastMonth = monthKey;
+          listEl.createEl("h4", "day-won-list-month-title").setText(
+            formatDate(monthKey + "-01", "monthYear")
+          );
+        }
+        const dayGroup = listEl.createDiv("day-won-list-day-group");
+        const dayHeaderWrap = dayGroup.createDiv("day-won-list-day-header-wrap");
+        const date = new Date(y, m - 1, d);
+        dayHeaderWrap.createEl("div", "day-won-list-day-weekday").setText(
+          date.toLocaleDateString(undefined, { weekday: "short" }).toUpperCase().slice(0, 3)
+        );
+        dayHeaderWrap.createEl("div", "day-won-list-day-num").setText(String(d));
+        const dayEntriesWrap = dayGroup.createDiv("day-won-list-day-entries");
+        for (const entry of dayEntries) {
+          const row = dayEntriesWrap.createDiv("day-won-list-entry");
+          const time = entry.time ? entry.time.slice(0, 5) : "";
+          if (time) row.createSpan("day-won-list-time").setText(time);
+          const content = row.createDiv("day-won-list-content");
+          const textBlock = content.createDiv("day-won-list-text");
+          textBlock.createDiv("day-won-list-title").setText(entry.name);
+          const showSnippet =
+            entry.preview &&
+            entry.preview.trim() !== entry.name.trim() &&
+            entry.preview.trim() !== entry.file.basename.replace(/\.md$/i, "");
+          if (showSnippet) {
+            textBlock.createDiv("day-won-list-snippet").setText(entry.preview.trim());
+          }
+          const listPaths = entry.imagePaths?.length ? entry.imagePaths : (entry.firstImagePath ? [entry.firstImagePath] : []);
+          const listSlots = getImageGridSlots(listPaths);
+          if (listSlots.length > 0) {
+            const thumbWrap = content.createDiv("day-won-list-thumb day-won-list-thumb-grid");
+            this.renderImageGrid(thumbWrap, listSlots, this.getEntryIcon(entry));
+          } else {
+            const iconWrap = content.createDiv("day-won-list-thumb day-won-list-thumb-icon");
+            iconWrap.style.setProperty("--day-won-entry-icon-color", this.getJournalColor(entry.journal || "Default"));
+            const icon = this.getEntryIcon(entry);
+            setIcon(iconWrap.createSpan("day-won-list-entry-icon"), icon);
+          }
+          row.addEventListener("click", () => this.openEntry(entry));
+        }
+      }
+      return;
+    }
+
     const byJournal = groupEntriesByJournal(entries);
     const journalNames = [...byJournal.keys()].sort();
-
-    const listEl = container.createDiv("day-won-list");
     for (const journalName of journalNames) {
       const journalEntries = byJournal.get(journalName) ?? [];
       const section = listEl.createDiv("day-won-list-journal-section");
-      section.createEl("h2", "day-won-list-journal-title").setText(journalName);
 
       let lastYear = "";
       let lastMonth = "";
       let lastDate = "";
+      let dayEntriesWrap: HTMLElement | null = null;
       for (const entry of journalEntries) {
-        const [y, m] = entry.date.split("-");
-        const year = y;
-        const monthKey = `${y}-${m}`;
+        const [y, m, d] = entry.date.split("-").map(Number);
+        const year = String(y);
+        const monthKey = `${y}-${String(m).padStart(2, "0")}`;
         if (year !== lastYear) {
           lastYear = year;
           section.createEl("h3", "day-won-list-year-title").setText(year);
@@ -353,25 +865,57 @@ export class DayWonView extends ItemView {
         }
         if (entry.date !== lastDate) {
           lastDate = entry.date;
-          const dayLabel = formatDate(entry.date, "dayFull");
-          section.createDiv("day-won-list-day-header").setText(dayLabel);
+          const dayGroup = section.createDiv("day-won-list-day-group");
+          const dayHeaderWrap = dayGroup.createDiv("day-won-list-day-header-wrap");
+          const date = new Date(y, m - 1, d);
+          dayHeaderWrap.createEl("div", "day-won-list-day-weekday").setText(
+            date.toLocaleDateString(undefined, { weekday: "short" }).toUpperCase().slice(0, 3)
+          );
+          dayHeaderWrap.createEl("div", "day-won-list-day-num").setText(String(d));
+          dayEntriesWrap = dayGroup.createDiv("day-won-list-day-entries");
         }
-        const row = section.createDiv("day-won-list-entry");
+        const row = dayEntriesWrap!.createDiv("day-won-list-entry");
         const time = entry.time ? entry.time.slice(0, 5) : "";
         if (time) row.createSpan("day-won-list-time").setText(time);
         const content = row.createDiv("day-won-list-content");
-        content.createDiv("day-won-list-preview").setText(entry.name);
-        if (entry.firstImagePath) {
-          const imgWrap = content.createDiv("day-won-list-thumb");
-          const img = document.createElement("img");
-          img.src = this.getImageUrl(entry.firstImagePath);
-          img.alt = "";
-          img.loading = "lazy";
-          imgWrap.appendChild(img);
+        const textBlock = content.createDiv("day-won-list-text");
+        textBlock.createDiv("day-won-list-title").setText(entry.name);
+        const showSnippet =
+          entry.preview &&
+          entry.preview.trim() !== entry.name.trim() &&
+          entry.preview.trim() !== entry.file.basename.replace(/\.md$/i, "");
+        if (showSnippet) {
+          textBlock.createDiv("day-won-list-snippet").setText(entry.preview.trim());
+        }
+        const listPaths = entry.imagePaths?.length ? entry.imagePaths : (entry.firstImagePath ? [entry.firstImagePath] : []);
+        const listSlots = getImageGridSlots(listPaths);
+        if (listSlots.length > 0) {
+          const thumbWrap = content.createDiv("day-won-list-thumb day-won-list-thumb-grid");
+          this.renderImageGrid(thumbWrap, listSlots, this.getEntryIcon(entry));
+        } else {
+          const iconWrap = content.createDiv("day-won-list-thumb day-won-list-thumb-icon");
+          iconWrap.style.setProperty("--day-won-entry-icon-color", this.getJournalColor(entry.journal || "Default"));
+          const icon = this.getEntryIcon(entry);
+          setIcon(iconWrap.createSpan("day-won-list-entry-icon"), icon);
         }
         row.addEventListener("click", () => this.openEntry(entry));
       }
     }
+  }
+
+  /** Icon chain: user entry type (settings order) → lapse (timer) → default (file-text). */
+  private getEntryIcon(entry: JournalEntry): string {
+    if (entry.entryType) return this.getEntryTypeIcon(entry.entryType);
+    if (entry.hasLapseEntries) return "timer";
+    return "file-text";
+  }
+
+  private getEntryTypeIcon(typeName: string | null): string {
+    if (!typeName) return "file-text";
+    const t = (this.plugin.settings.entryTypes ?? []).find(
+      (e) => e.name.trim().toLowerCase() === typeName.trim().toLowerCase()
+    );
+    return t?.icon?.trim() || "file-text";
   }
 
   private todayKey(): string {
@@ -391,59 +935,44 @@ export class DayWonView extends ItemView {
     const isAllView =
       this.selectedJournal === null || this.selectedJournal === "All";
 
-    if (isAllView) {
-      if (dayEntries.length > 0) {
-        const num = document.createElement("div");
-        num.className = "day-won-calendar-day-num";
-        num.textContent = String(dayNum);
-        cell.appendChild(num);
-        const dots = document.createElement("div");
-        dots.className = "day-won-calendar-day-dots";
-        for (const e of dayEntries) {
-          const dot = document.createElement("span");
-          dot.className = "day-won-calendar-dot";
-          dot.style.backgroundColor = this.getJournalColor(e.journal || "Default");
-          dots.appendChild(dot);
-        }
-        cell.appendChild(dots);
-        cell.classList.add("has-entries");
-        cell.addEventListener("click", () => this.openDay(dateKey, dayEntries));
-      } else {
-        const num = document.createElement("div");
-        num.className = "day-won-calendar-day-num";
-        num.textContent = String(dayNum);
-        cell.appendChild(num);
-      }
-    } else {
-      const bgEntry = dayEntries.find((e) => e.firstImagePath) ?? dayEntries[0];
-      if (bgEntry?.firstImagePath) {
-        cell.style.backgroundImage = `url(${this.getImageUrl(bgEntry.firstImagePath)})`;
-        cell.style.backgroundSize = "cover";
-        cell.style.backgroundPosition = "center";
-      } else if (this.selectedJournal && dayEntries.length > 0) {
-        cell.style.borderColor = this.getJournalColor(this.selectedJournal);
-        cell.style.borderWidth = "2px";
-      }
+    const aggregatedPaths: string[] = [];
+    for (const e of dayEntries) {
+      if (e.imagePaths?.length) aggregatedPaths.push(...e.imagePaths);
+      else if (e.firstImagePath) aggregatedPaths.push(e.firstImagePath);
+    }
+    const gridSlots = getImageGridSlots(aggregatedPaths);
+
+    if (gridSlots.length > 0) {
+      this.renderImageGrid(cell, gridSlots, "image");
+    } else if (!isAllView && this.selectedJournal && dayEntries.length > 0) {
+      cell.style.borderColor = this.getJournalColor(this.selectedJournal);
+      cell.style.borderWidth = "2px";
+    }
+
+    if (dayEntries.length > 0) {
       const num = document.createElement("div");
       num.className = "day-won-calendar-day-num";
       num.textContent = String(dayNum);
       cell.appendChild(num);
-      if (dayEntries.length > 0) {
-        const dots = document.createElement("div");
-        dots.className = "day-won-calendar-day-dots";
-        const color = this.getJournalColor(
-          this.selectedJournal || dayEntries[0].journal || "Default"
-        );
-        for (let i = 0; i < dayEntries.length; i++) {
-          const dot = document.createElement("span");
-          dot.className = "day-won-calendar-dot";
-          dot.style.backgroundColor = color;
-          dots.appendChild(dot);
-        }
-        cell.appendChild(dots);
-        cell.classList.add("has-entries");
-        cell.addEventListener("click", () => this.openDay(dateKey, dayEntries));
+      const dots = document.createElement("div");
+      dots.className = "day-won-calendar-day-dots";
+      const color = isAllView
+        ? undefined
+        : this.getJournalColor(this.selectedJournal || dayEntries[0].journal || "Default");
+      for (const e of dayEntries) {
+        const dot = document.createElement("span");
+        dot.className = "day-won-calendar-dot";
+        dot.style.backgroundColor = color ?? this.getJournalColor(e.journal || "Default");
+        dots.appendChild(dot);
       }
+      cell.appendChild(dots);
+      cell.classList.add("has-entries");
+      cell.addEventListener("click", () => this.openDay(dateKey, dayEntries));
+    } else {
+      const num = document.createElement("div");
+      num.className = "day-won-calendar-day-num";
+      num.textContent = String(dayNum);
+      cell.appendChild(num);
     }
     return cell;
   }
@@ -611,6 +1140,7 @@ export class DayDetailView extends ItemView {
   }
 
   private getImageUrl(path: string): string {
+    if (path.startsWith("http://") || path.startsWith("https://")) return path;
     const file = this.app.vault.getAbstractFileByPath(path);
     if (file instanceof TFile) return this.app.vault.getResourcePath(file);
     for (const ext of ["", ".png", ".jpg", ".jpeg", ".webp", ".gif"]) {
@@ -639,11 +1169,8 @@ export class DayDetailView extends ItemView {
         s.timeProperty || "",
         s.entryProperty || "entry",
         s.journalProperty || "journal",
-        {
-          workout: s.entryTypeWorkout ?? { mode: "", value: "" },
-          location: s.entryTypeLocation ?? { mode: "", value: "" },
-          trip: s.entryTypeTrip ?? { mode: "", value: "" },
-        }
+        entryTypesToRuleShape(this.plugin.settings.entryTypes),
+        this.plugin.settings.lapseEntriesProperty ?? "lapseEntries"
       );
       let list = all.filter((e) => e.date === this.state.dateKey);
       if (this.state.journalFilter != null && this.state.journalFilter !== "All") {
@@ -729,17 +1256,33 @@ export class DayDetailView extends ItemView {
 
       const cardBody = card.createDiv("day-won-day-card-body");
       const row = cardBody.createDiv("day-won-day-card-body-row");
-      if (entry.entryType) {
-        const iconWrap = row.createDiv("day-won-day-card-icon-wrap");
-        iconWrap.addClass(`day-won-day-type-${entry.entryType}`);
-        setIcon(iconWrap.createSpan("day-won-day-card-icon"), this.entryTypeIcon(entry.entryType));
-      }
+      /* Icon: user entry type (settings order) → lapse (timer) → default (file-text). Color from entry's journal. */
+      const iconWrap = row.createDiv("day-won-day-card-icon-wrap");
+      iconWrap.style.setProperty("--day-won-entry-icon-color", this.getJournalColor(entry.journal || "Default"));
+      const icon = entry.entryType
+        ? this.getEntryTypeIcon(entry.entryType)
+        : entry.hasLapseEntries
+          ? "timer"
+          : "file-text";
+      if (entry.entryType) iconWrap.addClass(`day-won-day-type-${(entry.entryType ?? "").replace(/\s+/g, "-")}`);
+      else if (entry.hasLapseEntries) iconWrap.addClass("day-won-day-type-lapse");
+      else iconWrap.addClass("day-won-day-type-default");
+      setIcon(iconWrap.createSpan("day-won-day-card-icon"), icon);
       const textWrap = row.createDiv("day-won-day-card-text");
       if (entry.time && entry.time.trim()) {
         const timeStr = entry.time.trim().slice(0, 5);
         if (timeStr) textWrap.createEl("div", "day-won-day-card-time").setText(timeStr);
       }
       textWrap.createEl("div", "day-won-day-card-name").setText(entry.name);
+      if (entry.isMedia && (entry.showTitle ?? entry.season ?? entry.episode)) {
+        const parts: string[] = [];
+        if (entry.showTitle) parts.push(entry.showTitle);
+        if (entry.season != null) parts.push(`Season ${entry.season}`);
+        if (entry.episode != null) parts.push(`Episode ${entry.episode}`);
+        if (parts.length > 0) {
+          textWrap.createEl("div", "day-won-day-card-media-subtitle").setText(parts.join(" "));
+        }
+      }
 
       if (bodyImages.length > 0) {
         const grid = cardBody.createDiv("day-won-day-card-images");
@@ -764,17 +1307,17 @@ export class DayDetailView extends ItemView {
     return `${diff} Years Ago`;
   }
 
-  private entryTypeIcon(kind: EntryTypeKind): string {
-    switch (kind) {
-      case "workout":
-        return "dumbbell";
-      case "location":
-        return "map-pin";
-      case "trip":
-        return "car";
-      default:
-        return "file-text";
-    }
+  private getJournalColor(journalName: string): string {
+    const configs = this.plugin.settings.journalConfigs ?? {};
+    return configs[journalName]?.color ?? getDefaultJournalColor(journalName);
+  }
+
+  private getEntryTypeIcon(typeName: string | null): string {
+    if (!typeName) return "file-text";
+    const t = (this.plugin.settings.entryTypes ?? []).find(
+      (e) => e.name.trim().toLowerCase() === typeName.trim().toLowerCase()
+    );
+    return t?.icon?.trim() || "file-text";
   }
 
   private navigateTo(dateKey: string) {
@@ -815,6 +1358,7 @@ class DayDetailModal extends Modal {
   }
 
   private getImageUrl(path: string): string {
+    if (path.startsWith("http://") || path.startsWith("https://")) return path;
     const file = this.app.vault.getAbstractFileByPath(path);
     if (file instanceof TFile) return this.app.vault.getResourcePath(file);
     for (const ext of ["", ".png", ".jpg", ".jpeg", ".webp", ".gif"]) {

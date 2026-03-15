@@ -1,10 +1,16 @@
 import { Plugin } from "obsidian";
-import { DEFAULT_SETTINGS, DayWonSettings, DayWonSettingTab, type EntryTypeRule } from "./settings";
+import { DEFAULT_SETTINGS, DayWonSettings, DayWonSettingTab } from "./settings";
 import { DayWonView, DayDetailView, VIEW_TYPE_DAY_WON, VIEW_TYPE_DAY_WON_DAY } from "./view";
 import { parseFolderList } from "./journal";
 
+/** Lucide icon for ribbon and view tab (open book). Use "book-open"; rebuild and restart Obsidian if the icon doesn’t update. */
+const PLUGIN_ICON = "book-open";
+
+const REFRESH_DEBOUNCE_MS = 250;
+
 export default class DayWonPlugin extends Plugin {
   settings: DayWonSettings = { ...DEFAULT_SETTINGS };
+  private refreshTimeout: ReturnType<typeof setTimeout> | null = null;
 
   async onload() {
     await this.loadSettings();
@@ -12,7 +18,7 @@ export default class DayWonPlugin extends Plugin {
     this.registerView(VIEW_TYPE_DAY_WON, (leaf) => new DayWonView(leaf, this));
     this.registerView(VIEW_TYPE_DAY_WON_DAY, (leaf) => new DayDetailView(leaf, this));
 
-    this.addRibbonIcon("book-open", "Open Day, Won! journal", () => this.activateView());
+    this.addRibbonIcon(PLUGIN_ICON, "Open Day, Won! journal", () => this.activateView());
 
     this.addCommand({
       id: "open-day-won",
@@ -33,17 +39,23 @@ export default class DayWonPlugin extends Plugin {
           (f) => file.path === f || file.path.startsWith(f + "/")
         );
       if (!inScope) return;
-      const leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE_DAY_WON)[0];
-      const view = leaf?.view;
-      if (view && view instanceof DayWonView) view.refresh();
-      for (const dayLeaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_DAY_WON_DAY)) {
-        const dayView = dayLeaf?.view;
-        if (dayView && dayView instanceof DayDetailView) dayView.refresh();
-      }
+      if (this.refreshTimeout != null) clearTimeout(this.refreshTimeout);
+      this.refreshTimeout = setTimeout(() => {
+        this.refreshTimeout = null;
+        const leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE_DAY_WON)[0];
+        const view = leaf?.view;
+        if (view && view instanceof DayWonView) view.refresh();
+        for (const dayLeaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_DAY_WON_DAY)) {
+          const dayView = dayLeaf?.view;
+          if (dayView && dayView instanceof DayDetailView) dayView.refresh();
+        }
+      }, REFRESH_DEBOUNCE_MS);
     });
   }
 
-  onunload() {}
+  onunload() {
+    if (this.refreshTimeout != null) clearTimeout(this.refreshTimeout);
+  }
 
   async activateView() {
     const { workspace } = this.app;
@@ -63,10 +75,17 @@ export default class DayWonPlugin extends Plugin {
         raw.journalFolders = raw.journalFolder;
       }
       if (raw.journalConfigs == null) raw.journalConfigs = {};
-      const defaultRule: EntryTypeRule = { mode: "", value: "" };
-      if (raw.entryTypeWorkout == null) raw.entryTypeWorkout = defaultRule;
-      if (raw.entryTypeLocation == null) raw.entryTypeLocation = defaultRule;
-      if (raw.entryTypeTrip == null) raw.entryTypeTrip = defaultRule;
+      if (raw.entryTypes == null || !Array.isArray(raw.entryTypes) || raw.entryTypes.length === 0) {
+        raw.entryTypes = [
+          { name: "Workout", mode: (raw as any).entryTypeWorkout?.mode ?? "", value: (raw as any).entryTypeWorkout?.value ?? "", icon: "dumbbell" },
+          { name: "Location", mode: (raw as any).entryTypeLocation?.mode ?? "", value: (raw as any).entryTypeLocation?.value ?? "", icon: "map-pin" },
+          { name: "Trip", mode: (raw as any).entryTypeTrip?.mode ?? "", value: (raw as any).entryTypeTrip?.value ?? "", icon: "car" },
+        ];
+      }
+      if (raw.lapseEntriesProperty == null) raw.lapseEntriesProperty = "lapseEntries";
+      if (raw.defaultJournalEntryLocation == null) raw.defaultJournalEntryLocation = DEFAULT_SETTINGS.defaultJournalEntryLocation;
+      if (raw.attachmentMode == null) raw.attachmentMode = DEFAULT_SETTINGS.attachmentMode;
+      if (raw.assetsFolderPath == null) raw.assetsFolderPath = DEFAULT_SETTINGS.assetsFolderPath;
     }
     this.settings = Object.assign({}, DEFAULT_SETTINGS, raw);
   }

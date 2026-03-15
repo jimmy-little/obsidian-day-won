@@ -1,8 +1,5 @@
 import { TFile, TFolder, Vault, MetadataCache } from "obsidian";
 
-/** Optional entry type: workout, location/check-in, or trip. Classified by path or frontmatter rules; frontmatter wins over path. */
-export type EntryTypeKind = "workout" | "location" | "trip";
-
 /** A single journal entry: one note with resolved date and optional first image. */
 export interface JournalEntry {
   file: TFile;
@@ -20,11 +17,23 @@ export interface JournalEntry {
   coverImagePath: string | null;
   /** All image paths from the note (body + frontmatter) for tiling in day view. */
   imagePaths: string[];
-  /** Optional: workout, location, or trip when rules match. Frontmatter match wins over path. */
-  entryType: EntryTypeKind | null;
+  /** User-defined entry type name when rules match (order = priority). */
+  entryType: string | null;
+  /** True when frontmatter has the time-tracking key set with a non-empty value (see settings). */
+  hasLapseEntries: boolean;
+  /** True when entry is classified as media (season/episode, show/embed, tags, etc.). */
+  isMedia: boolean;
+  /** For media: show/series title from frontmatter (show_title). */
+  showTitle: string | null;
+  /** For media: season number or label from frontmatter (season). */
+  season: string | number | null;
+  /** For media: episode number or label from frontmatter (episode). */
+  episode: string | number | null;
 }
 
-export interface EntryTypeRule {
+/** Rule shape for one entry type (name + mode + value). Order in array = priority. */
+export interface EntryTypeRuleShape {
+  name: string;
   mode: "" | "path" | "frontmatter";
   value: string;
 }
@@ -173,12 +182,63 @@ function stripWikilinkDisplay(s: string): string {
   return t.replace(/^_+/, "").trim() || s;
 }
 
-/** Normalize time for display: ISO "2026-03-11T06:53:33" -> "06:53"; "06:53" unchanged. */
+const MEDIA_TYPES = new Set(["movie", "tvshow", "tv show", "podcast", "book", "youtube"]);
+
+function normalizeForMediaMatch(s: string): string {
+  return s.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function classifyAsMedia(front: Record<string, unknown> | undefined, content: string): boolean {
+  if (!front && !content) return false;
+  if (front) {
+    if (front.season != null || front.episode != null) return true;
+    if (typeof front.episode_title === "string" && front.episode_title.trim()) return true;
+    if (typeof front.show_title === "string" && front.show_title.trim()) return true;
+    for (const key of Object.keys(front)) {
+      const v = front[key];
+      if (typeof v === "string" && v.includes("youtube")) return true;
+    }
+    const g = front.globalType ?? front.global_type;
+    const gStr = typeof g === "string" ? normalizeForMediaMatch(g) : "";
+    if (gStr && MEDIA_TYPES.has(gStr)) return true;
+    const tags = front.tags;
+    if (Array.isArray(tags)) {
+      for (const t of tags) {
+        const n = typeof t === "string" ? normalizeForMediaMatch(t.replace(/^#/, "")) : "";
+        if (n && MEDIA_TYPES.has(n)) return true;
+      }
+    }
+  }
+  if (content && /youtube\.com\/embed|youtube\.com\/watch|youtu\.be\//i.test(content)) return true;
+  return false;
+}
+
+/** Display name fallback chain: entry (front or inline) → title → name → project → preview (filename). */
+function resolveDisplayName(
+  front: Record<string, unknown> | undefined,
+  entryName: string,
+  inlineEntry: string | null,
+  preview: string
+): string {
+  const fromEntry = (entryName || inlineEntry || "").trim();
+  if (fromEntry) return stripWikilinkDisplay(fromEntry);
+  const fromTitle = typeof front?.title === "string" ? front.title.trim() : "";
+  if (fromTitle) return stripWikilinkDisplay(fromTitle);
+  const fromName = typeof front?.name === "string" ? front.name.trim() : "";
+  if (fromName) return stripWikilinkDisplay(fromName);
+  const fromProject = typeof front?.project === "string" ? front.project.trim() : "";
+  if (fromProject) return stripWikilinkDisplay(fromProject);
+  return stripWikilinkDisplay(preview);
+}
+
+/** Normalize time for display: extract HH:MM from ISO, "YYYY-MM-DD HH:MM", or pass through. */
 function normalizeTimeForDisplay(raw: string): string {
   const t = typeof raw === "string" ? raw.trim() : "";
   if (!t) return t;
   const iso = t.match(/^\d{4}-\d{2}-\d{2}T(\d{2}:\d{2}(?::\d{2})?)/);
   if (iso) return iso[1].slice(0, 5);
+  const dateSpace = t.match(/^\d{4}-\d{2}-\d{2}\s+(\d{2}:\d{2}(?::\d{2})?)/);
+  if (dateSpace) return dateSpace[1].slice(0, 5);
   return t;
 }
 
@@ -191,16 +251,55 @@ function getInlineFieldValue(content: string, fieldKey: string): string | null {
   return match[1].trim() || null;
 }
 
+/** Remove YAML frontmatter block (between first --- and second ---). */
+function stripFrontmatter(content: string): string {
+  if (!content.startsWith("---")) return content;
+  const second = content.indexOf("\n---", 4);
+  if (second === -1) return content;
+  return content.slice(second + 4).trimStart();
+}
+
+/** Remove fenced code blocks (e.g. ```dataview, ```js, ```) so preview uses prose only. */
+function stripCodeBlocks(content: string): string {
+  const lines = content.split("\n");
+  const out: string[] = [];
+  let inBlock = false;
+  for (const line of lines) {
+    if (/^```[\w]*\s*$/.test(line)) {
+      inBlock = !inBlock;
+      continue;
+    }
+    if (!inBlock) out.push(line);
+  }
+  return out.join("\n");
+}
+
+/** Clean a line for preview: show value not field name for inline fields; strip blockquote/callout syntax. */
+function previewLine(line: string): string {
+  let s = line.trim();
+  // Blockquote / callout: "> [!note] text" or "> text"
+  s = s.replace(/^\s*>\s*/, "");
+  s = s.replace(/^\[![\w-]+\]\s*/, "");
+  // Inline field: "entry:: value" -> "value"
+  const inlineMatch = s.match(/^\w+::\s*(.*)$/);
+  if (inlineMatch) s = inlineMatch[1].trim();
+  return s;
+}
+
+const FRONTMATTER_IMAGE_KEYS = ["cover", "image", "image_url", "banner", "photo", "thumbnail"];
+
 function getFrontmatterImagePath(front: Record<string, unknown> | undefined, file: TFile): string | null {
   if (!front) return null;
-  const keys = ["cover", "image", "banner", "photo", "thumbnail"];
-  for (const k of keys) {
+  for (const k of FRONTMATTER_IMAGE_KEYS) {
     const v = front[k];
     if (typeof v !== "string" || !v.trim()) continue;
     let src = v.trim();
     const wikilinkMatch = src.match(WIKILINK_IN_FM_REGEX);
     if (wikilinkMatch) src = wikilinkMatch[1].trim();
-    if (!src || src.startsWith("http://") || src.startsWith("https://")) continue;
+    if (!src) continue;
+    const isUrl = src.startsWith("http://") || src.startsWith("https://");
+    if (isUrl && k !== "image_url") continue;
+    if (isUrl) return src;
     const dir = (file.parent && file.parent.path) ? file.parent.path + "/" : "";
     return src.includes("/") ? src : (dir ? resolveRelativePath(dir, src) : src);
   }
@@ -311,13 +410,6 @@ function getMarkdownFilesInFolders(vault: Vault, folderList: string[]): TFile[] 
   return out;
 }
 
-/** Entry type rules keyed by kind. Used to classify notes; frontmatter match wins over path. */
-export interface EntryTypeRules {
-  workout: EntryTypeRule;
-  location: EntryTypeRule;
-  trip: EntryTypeRule;
-}
-
 /** Parse comma-separated "key: value" frontmatter conditions. Values may be quoted. */
 function parseFrontmatterConditions(value: string): { key: string; value: string }[] {
   const out: { key: string; value: string }[] = [];
@@ -345,6 +437,23 @@ function frontmatterMatches(front: Record<string, unknown> | undefined, conditio
   return true;
 }
 
+/** Expand date placeholders in a folder path. dateKey = "YYYY-MM-DD". Supports {YYYY}, {MM}, {DD}, {YYYY/MM}, {YYYY-MM}, {MM/DD}. */
+function expandPathTemplate(template: string, dateKey: string): string {
+  const parts = dateKey.split("-").map(Number);
+  if (parts.length < 3) return template;
+  const [y, m, d] = parts;
+  const YYYY = String(y);
+  const MM = String(m).padStart(2, "0");
+  const DD = String(d).padStart(2, "0");
+  return template
+    .replace(/\{YYYY\/MM\}/g, `${YYYY}/${MM}`)
+    .replace(/\{YYYY-MM\}/g, `${YYYY}-${MM}`)
+    .replace(/\{MM\/DD\}/g, `${MM}/${DD}`)
+    .replace(/\{YYYY\}/g, YYYY)
+    .replace(/\{MM\}/g, MM)
+    .replace(/\{DD\}/g, DD);
+}
+
 /** Check if file path is under any of the given folder paths (vault-relative, no leading slash). */
 function pathUnderFolders(filePath: string, folderList: string[]): boolean {
   const normalized = filePath.replace(/^\/+/, "");
@@ -355,26 +464,26 @@ function pathUnderFolders(filePath: string, folderList: string[]): boolean {
   return false;
 }
 
-/** Classify a note: frontmatter rules first, then path rules. Returns first matching type or null. */
+/** Classify a note by ordered entry types: first match wins. dateKey = note date "YYYY-MM-DD". */
 function classifyEntryType(
   filePath: string,
   front: Record<string, unknown> | undefined,
-  rules: EntryTypeRules
-): EntryTypeKind | null {
-  const kinds: EntryTypeKind[] = ["workout", "location", "trip"];
-  // 1) Frontmatter wins: check each type's frontmatter rule
-  for (const kind of kinds) {
-    const r = rules[kind];
-    if (r?.mode !== "frontmatter" || !r.value.trim()) continue;
-    const conditions = parseFrontmatterConditions(r.value);
-    if (frontmatterMatches(front, conditions)) return kind;
+  entryTypes: EntryTypeRuleShape[],
+  dateKey: string
+): string | null {
+  if (!entryTypes?.length) return null;
+  // 1) Frontmatter: check each type in order
+  for (const t of entryTypes) {
+    if (t.mode !== "frontmatter" || !t.value.trim()) continue;
+    const conditions = parseFrontmatterConditions(t.value);
+    if (frontmatterMatches(front, conditions)) return t.name;
   }
-  // 2) Path: first matching path rule
-  for (const kind of kinds) {
-    const r = rules[kind];
-    if (r?.mode !== "path" || !r.value.trim()) continue;
-    const paths = r.value.split(",").map((s) => s.trim()).filter(Boolean);
-    if (pathUnderFolders(filePath, paths)) return kind;
+  // 2) Path: first matching path rule (expand date vars with note date)
+  for (const t of entryTypes) {
+    if (t.mode !== "path" || !t.value.trim()) continue;
+    const rawPaths = t.value.split(",").map((s) => s.trim()).filter(Boolean);
+    const paths = rawPaths.map((p) => expandPathTemplate(p, dateKey));
+    if (pathUnderFolders(filePath, paths)) return t.name;
   }
   return null;
 }
@@ -388,13 +497,11 @@ export async function getJournalEntries(
   timeProperty: string,
   entryProperty: string,
   journalProperty: string,
-  entryTypeRules?: EntryTypeRules
+  entryTypes?: EntryTypeRuleShape[],
+  lapseEntriesProperty?: string
 ): Promise<JournalEntry[]> {
-  const rules: EntryTypeRules = entryTypeRules ?? {
-    workout: { mode: "", value: "" },
-    location: { mode: "", value: "" },
-    trip: { mode: "", value: "" },
-  };
+  const types = entryTypes ?? [];
+  const lapseKey = (lapseEntriesProperty ?? "lapseEntries").trim() || null;
 
   const files = getMarkdownFilesInFolders(vault, folderList);
   const candidates: { file: TFile; date: string; timeStr: string; journal: string; entryName: string }[] = [];
@@ -422,16 +529,23 @@ export async function getJournalEntries(
     const cache = metadataCache.getFileCache(file);
     const front = cache?.frontmatter;
     const frontImgRaw = getFrontmatterImagePath(front, file);
-    const frontImg = frontImgRaw
-      ? resolveToImagePath(vault, metadataCache, file.path, frontImgRaw)
-      : null;
+    const isExternalUrl =
+      typeof frontImgRaw === "string" &&
+      (frontImgRaw.startsWith("http://") || frontImgRaw.startsWith("https://"));
+    const frontImg = isExternalUrl
+      ? frontImgRaw
+      : frontImgRaw
+        ? resolveToImagePath(vault, metadataCache, file.path, frontImgRaw)
+        : null;
     if (frontImg) firstImagePath = frontImg;
-    const entryType = classifyEntryType(file.path, front, rules);
+    const entryType = classifyEntryType(file.path, front, types, date);
     let preview = file.basename;
-    let name = entryName || preview;
+    let name = resolveDisplayName(front, entryName, null, preview);
     let imagePaths: string[] = [];
+    let isMedia = classifyAsMedia(front, "");
     try {
       const content = await vault.cachedRead(file);
+      isMedia = classifyAsMedia(front, content);
       if (!firstImagePath) {
         const contentImg = getFirstImageFromContent(content, file);
         if (contentImg) {
@@ -445,16 +559,40 @@ export async function getJournalEntries(
         .filter((p): p is string => p != null);
       if (frontImg) imagePaths = [frontImg, ...fromContent.filter((p) => p !== frontImg)];
       else imagePaths = fromContent;
-      const firstLine = content
+      const body = stripCodeBlocks(stripFrontmatter(content));
+      const contentLines = body
         .split("\n")
-        .find((l) => l.trim().length > 0 && !l.trim().startsWith("#") && !l.trim().startsWith("---"));
-      if (firstLine) preview = firstLine.trim().slice(0, 120);
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0 && !l.startsWith("#") && !l.startsWith("---"));
+      const previewLines = contentLines.map(previewLine).filter((l) => l.length > 0);
+      const firstTwo = previewLines.slice(0, 2).join(" ").trim();
+      if (firstTwo) preview = firstTwo.slice(0, 180);
       const inlineEntry = entryProperty ? getInlineFieldValue(content, entryProperty) : null;
-      name = stripWikilinkDisplay(entryName || inlineEntry || preview);
+      name = resolveDisplayName(front, entryName, inlineEntry, preview);
     } catch {
       // ignore read errors
     }
     if (firstImagePath && imagePaths.length === 0) imagePaths = [firstImagePath];
+    const lapse = lapseKey && front ? front[lapseKey] : undefined;
+    const hasLapseEntries =
+      lapseKey != null &&
+      lapse != null &&
+      (Array.isArray(lapse) ? lapse.length > 0 : typeof lapse === "object" ? Object.keys(lapse).length > 0 : Boolean(lapse));
+    const showTitleRaw = front?.show_title ?? front?.showTitle;
+    const showTitle =
+      typeof showTitleRaw === "string" && showTitleRaw.trim()
+        ? stripWikilinkDisplay(showTitleRaw.trim())
+        : null;
+    const seasonRaw = front?.season;
+    const season =
+      seasonRaw != null && (typeof seasonRaw === "number" || typeof seasonRaw === "string")
+        ? seasonRaw
+        : null;
+    const episodeRaw = front?.episode;
+    const episode =
+      episodeRaw != null && (typeof episodeRaw === "number" || typeof episodeRaw === "string")
+        ? episodeRaw
+        : null;
     entries.push({
       file,
       date,
@@ -466,6 +604,11 @@ export async function getJournalEntries(
       coverImagePath: frontImg || null,
       imagePaths,
       entryType,
+      hasLapseEntries,
+      isMedia,
+      showTitle,
+      season,
+      episode,
     });
   }
 

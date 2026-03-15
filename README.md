@@ -68,6 +68,16 @@ This project is set up to use the vault at:
 | `npm run link-vault` | Symlink plugin into vault only       |
 | `npm run lint`       | Run ESLint (if configured)           |
 
+### Installing via BRAT (beta testers)
+
+BRAT installs from **GitHub Releases**; the release must include `main.js`, `manifest.json`, `styles.css`, `versions.json`. (Run `npm run release` to create one.)
+
+1. In BRAT, add this repo: `jimmy-little/obsidian-day-won`.
+2. **Pick a version from the list** (e.g. `0.0.1`) — don’t use the dev branch. The repo doesn’t include built `main.js`; only releases do.
+3. After it installs, go to **Settings → Community plugins** and **turn on “Day, Won!”** (BRAT doesn’t enable it for you).
+4. If install still fails (especially on mobile), check GitHub → Releases: the version you picked must have **Assets** with `main.js` attached. If not, run `npm run release` from this repo to create a proper release, then in BRAT use **Check for updates** or re-add the repo and pick the new version. Fully quit and reopen Obsidian. Release tags must match the version (e.g. `0.0.2`, not `v0.0.2`).
+5. **BRAT finds versions but install runs then fails:** BRAT may be using GitHub’s “Source code (zip)”, which does not contain the built `main.js`. Add a plugin zip to the release: run `node upload-plugin-zip-to-release.mjs 0.0.3` (use the version you’re testing), then try BRAT again. If it still fails, consider opening an issue on [obsidian42-brat](https://github.com/TfTHacker/obsidian42-brat) with your repo and release link.
+
 ### Repo
 
 - **Git:** https://github.com/jimmy-little/obsidian-day-won.git

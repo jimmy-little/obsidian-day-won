@@ -1,5 +1,5 @@
 {
-  "journalFolders": "70 Journal\n60 Logs\n90 Media",
+  "journalFolders": "70 Journal\n30 Work\n60 Logs\n90 Media",
   "journalConfigs": {
     "Dailily": {
       "color": "hsl(98, 55%, 52%)",
@@ -38,17 +38,80 @@
       "showInPicker": false
     },
     "Work": {
-      "color": "#1c23e3",
+      "color": "#4348d6",
       "showInPicker": true
     },
     "Health": {
       "color": "hsl(348, 55%, 52%)",
       "showInPicker": true
+    },
+    "Media": {
+      "color": "hsl(60, 55%, 52%)",
+      "showInPicker": true
     }
   },
+  "entryTypes": [
+    {
+      "name": "Workout",
+      "mode": "path",
+      "value": "60 Logs/{YYYY}/Workouts",
+      "icon": "dumbbell"
+    },
+    {
+      "name": "Location",
+      "mode": "frontmatter",
+      "value": "type: \"[[📍 Location]]\"",
+      "icon": "map-pin"
+    },
+    {
+      "name": "Trip",
+      "mode": "frontmatter",
+      "value": "type: \"[[🚗 Trip]]\"",
+      "icon": "car"
+    },
+    {
+      "name": "Meeting",
+      "mode": "path",
+      "value": "30 Work/Meetings",
+      "icon": "calendar"
+    },
+    {
+      "name": "Media",
+      "mode": "path",
+      "value": "90 Media/Series, 90 Media/Movies",
+      "icon": "film"
+    },
+    {
+      "name": "Podcasts",
+      "mode": "path",
+      "value": "90 Media/Podcasts",
+      "icon": "play"
+    },
+    {
+      "name": "Stats",
+      "mode": "frontmatter",
+      "value": "journal: Stats",
+      "icon": "activity"
+    },
+    {
+      "name": "Daily Notes",
+      "mode": "frontmatter",
+      "value": "journal: Daily",
+      "icon": "zap"
+    }
+  ],
+  "dateProperty": "date",
+  "timeProperty": "time",
+  "entryProperty": "entry",
+  "journalProperty": "journal",
+  "journalName": "All Journals",
+  "lapseEntriesProperty": "lapseEntries",
+  "defaultJournalEntryLocation": "70 Journal/Atomic/{YYYY}/{MM}",
+  "attachmentMode": "subfolder",
+  "assetsFolderPath": "Assets/{YYYY}/{MM}-{MMMM}",
   "entryTypeWorkout": {
     "mode": "path",
-    "value": "60 Logs/Workouts"
+    "value": "60 Logs/2026/Workouts"
   },
   "entryTypeLocation": {
     "mode": "frontmatter",
@@ -58,11 +121,6 @@
     "mode": "frontmatter",
     "value": "type: \"[[🚗 Trip]]\""
   },
-  "dateProperty": "date",
-  "timeProperty": "time",
-  "entryProperty": "entry",
-  "journalProperty": "journal",
-  "journalName": "All Journals",
   "journalDescription": "",
   "journalFolder": "70 Journal"
 }
