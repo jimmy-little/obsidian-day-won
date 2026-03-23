@@ -6,6 +6,7 @@ import {
   setIcon,
   App,
   getAllTags,
+  MarkdownRenderer,
 } from "obsidian";
 import type DayWonPlugin from "./main";
 
@@ -624,7 +625,9 @@ export class DayWonView extends ItemView {
         s.entryProperty || "entry",
         s.journalProperty || "journal",
         entryTypesToRuleShape(this.plugin.settings.entryTypes),
-        this.plugin.settings.lapseEntriesProperty ?? "lapseEntries"
+        this.plugin.settings.lapseEntriesProperty ?? "lapseEntries",
+        this.plugin.settings.leafletLatProperty ?? "lat",
+        this.plugin.settings.leafletLongProperty ?? "long"
       );
     } catch (e) {
       this.error = e instanceof Error ? e.message : String(e);
@@ -1086,6 +1089,27 @@ export class DayWonView extends ItemView {
   }
 }
 
+/** Build a ```leaflet block for the day view from entries with lat/long (Obsidian Leaflet plugin). */
+function buildDayLeafletMarkdown(entries: JournalEntry[], dateKey: string): string | null {
+  const withCoords = entries.filter((e) => e.latitude != null && e.longitude != null);
+  if (withCoords.length === 0) return null;
+  const id = `day_won_${dateKey.replace(/-/g, "_")}`;
+  const sumLat = withCoords.reduce((s, e) => s + e.latitude!, 0);
+  const sumLng = withCoords.reduce((s, e) => s + e.longitude!, 0);
+  const n = withCoords.length;
+  const lines = [
+    `id: ${id}`,
+    `lat: ${sumLat / n}`,
+    `long: ${sumLng / n}`,
+    "showAllMarkers: true",
+  ];
+  for (const e of withCoords) {
+    const pathNoExt = e.file.path.replace(/\.md$/i, "");
+    lines.push(`marker: default, ${e.latitude}, ${e.longitude}, [[${pathNoExt}]]`);
+  }
+  return "```leaflet\n" + lines.join("\n") + "\n```";
+}
+
 /** Full-page Day One–style view for a single day: aggregated entries, tiled images, type cards. */
 export class DayDetailView extends ItemView {
   static readonly VIEW_TYPE = VIEW_TYPE_DAY_WON_DAY;
@@ -1170,7 +1194,9 @@ export class DayDetailView extends ItemView {
         s.entryProperty || "entry",
         s.journalProperty || "journal",
         entryTypesToRuleShape(this.plugin.settings.entryTypes),
-        this.plugin.settings.lapseEntriesProperty ?? "lapseEntries"
+        this.plugin.settings.lapseEntriesProperty ?? "lapseEntries",
+        this.plugin.settings.leafletLatProperty ?? "lat",
+        this.plugin.settings.leafletLongProperty ?? "long"
       );
       let list = all.filter((e) => e.date === this.state.dateKey);
       if (this.state.journalFilter != null && this.state.journalFilter !== "All") {
@@ -1236,6 +1262,14 @@ export class DayDetailView extends ItemView {
       return;
     }
 
+    if (this.plugin.settings.useLeafletMaps) {
+      const leafletMd = buildDayLeafletMarkdown(this.entries, this.state.dateKey);
+      if (leafletMd) {
+        const leafletWrap = body.createDiv("day-won-day-leaflet");
+        void this.renderLeafletMarkdown(leafletWrap, leafletMd);
+      }
+    }
+
     const cardList = body.createDiv("day-won-day-card-list");
     for (const entry of this.entries) {
       const card = cardList.createDiv("day-won-day-card");
@@ -1296,6 +1330,20 @@ export class DayDetailView extends ItemView {
           cell.appendChild(img);
         }
       }
+    }
+  }
+
+  private async renderLeafletMarkdown(container: HTMLElement, markdown: string) {
+    container.empty();
+    const firstWithCoords = this.entries.find((e) => e.latitude != null && e.longitude != null);
+    const sourcePath = firstWithCoords?.file.path ?? "";
+    try {
+      await MarkdownRenderer.render(this.app, markdown, container, sourcePath, this);
+    } catch (e) {
+      console.error("Day Won: Leaflet markdown render failed", e);
+      container.createDiv("day-won-leaflet-error").setText(
+        "Map could not be rendered. Install and enable the Leaflet community plugin."
+      );
     }
   }
 

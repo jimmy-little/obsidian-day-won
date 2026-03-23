@@ -61,9 +61,10 @@ export default class DayWonPlugin extends Plugin {
     const { workspace } = this.app;
     let leaf = workspace.getLeavesOfType(VIEW_TYPE_DAY_WON)[0];
     if (!leaf) {
-      const right = workspace.getRightLeaf(false);
-      if (right) await right.setViewState({ type: VIEW_TYPE_DAY_WON });
-      leaf = workspace.getLeavesOfType(VIEW_TYPE_DAY_WON)[0];
+      // Open in main area (not sidebar) so it renders properly on narrow screens
+      const mainLeaf = workspace.getLeaf(true);
+      await mainLeaf.setViewState({ type: VIEW_TYPE_DAY_WON });
+      leaf = mainLeaf;
     }
     if (leaf) workspace.revealLeaf(leaf);
   }
@@ -86,6 +87,9 @@ export default class DayWonPlugin extends Plugin {
       if (raw.defaultJournalEntryLocation == null) raw.defaultJournalEntryLocation = DEFAULT_SETTINGS.defaultJournalEntryLocation;
       if (raw.attachmentMode == null) raw.attachmentMode = DEFAULT_SETTINGS.attachmentMode;
       if (raw.assetsFolderPath == null) raw.assetsFolderPath = DEFAULT_SETTINGS.assetsFolderPath;
+      if (raw.useLeafletMaps == null) raw.useLeafletMaps = false;
+      if (raw.leafletLatProperty == null) raw.leafletLatProperty = "lat";
+      if (raw.leafletLongProperty == null) raw.leafletLongProperty = "long";
     }
     this.settings = Object.assign({}, DEFAULT_SETTINGS, raw);
   }

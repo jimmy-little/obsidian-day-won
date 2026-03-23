@@ -47,6 +47,12 @@ export interface DayWonSettings {
   attachmentMode: "subfolder" | "assets";
   /** When attachment mode is "assets", folder path for attached images. Supports moment-style date variables. */
   assetsFolderPath: string;
+  /** Show an aggregated Leaflet map on the day view when entries have lat/long (requires Leaflet community plugin). */
+  useLeafletMaps: boolean;
+  /** Frontmatter key for latitude on check-in notes (Leaflet day map). */
+  leafletLatProperty: string;
+  /** Frontmatter key for longitude on check-in notes. Also reads `lng` / `longitude` when this is `long`. */
+  leafletLongProperty: string;
 }
 
 const DEFAULT_ENTRY_TYPES: UserEntryType[] = [
@@ -68,6 +74,9 @@ export const DEFAULT_SETTINGS: DayWonSettings = {
   defaultJournalEntryLocation: "Journal/{YYYY}/{MM}-{MMMM}",
   attachmentMode: "subfolder",
   assetsFolderPath: "Assets/{YYYY}/{MM}-{MMMM}",
+  useLeafletMaps: false,
+  leafletLatProperty: "lat",
+  leafletLongProperty: "long",
 };
 
 export class DayWonSettingTab extends PluginSettingTab {
@@ -317,6 +326,46 @@ export class DayWonSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           })
       );
+
+    containerEl.createEl("h3", { text: "Day view map (Leaflet)" }).addClass("day-won-settings-journals-heading");
+    new Setting(containerEl)
+      .setName("Use Leaflet maps")
+      .setDesc(
+        "On the day page, show one map with a marker per entry that has latitude/longitude in frontmatter. Requires the Leaflet community plugin to be installed and enabled."
+      )
+      .addToggle((toggle) => {
+        toggle.setValue(this.plugin.settings.useLeafletMaps ?? false).onChange(async (value) => {
+          this.plugin.settings.useLeafletMaps = value;
+          await this.plugin.saveSettings();
+          this.display();
+        });
+      });
+    if (this.plugin.settings.useLeafletMaps) {
+      new Setting(containerEl)
+        .setName("Latitude property")
+        .setDesc("Frontmatter key for latitude (e.g. lat).")
+        .addText((text) =>
+          text
+            .setPlaceholder("lat")
+            .setValue(this.plugin.settings.leafletLatProperty ?? "lat")
+            .onChange(async (value) => {
+              this.plugin.settings.leafletLatProperty = (value || "lat").trim();
+              await this.plugin.saveSettings();
+            })
+        );
+      new Setting(containerEl)
+        .setName("Longitude property")
+        .setDesc("Frontmatter key for longitude (e.g. long). If set to long, lng and longitude are also read.")
+        .addText((text) =>
+          text
+            .setPlaceholder("long")
+            .setValue(this.plugin.settings.leafletLongProperty ?? "long")
+            .onChange(async (value) => {
+              this.plugin.settings.leafletLongProperty = (value || "long").trim();
+              await this.plugin.saveSettings();
+            })
+        );
+    }
 
     new Setting(containerEl)
       .setName("Default journal entry location")

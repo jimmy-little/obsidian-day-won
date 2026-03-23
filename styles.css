@@ -1046,6 +1046,24 @@
   text-align: center;
 }
 
+.day-won-day-leaflet {
+  margin-bottom: 20px;
+  min-height: 220px;
+}
+
+.day-won-day-leaflet .markdown-preview-view,
+.day-won-day-leaflet .markdown-rendered {
+  min-height: 200px;
+}
+
+.day-won-leaflet-error {
+  font-size: 0.85rem;
+  color: var(--text-error);
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--background-modifier-error);
+}
+
 /* Card grid (Bases-style) */
 .day-won-day-card-list {
   display: flex;

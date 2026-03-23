@@ -4,4 +4,4 @@ set -e
 cd "$(dirname "$0")"
 npm run build
 npm run link-vault
-echo "Done. Enable 'Day Won' in Obsidian if needed."
+echo "Done. Enable 'Day, Won' in Obsidian if needed."

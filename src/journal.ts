@@ -29,6 +29,28 @@ export interface JournalEntry {
   season: string | number | null;
   /** For media: episode number or label from frontmatter (episode). */
   episode: string | number | null;
+  /** Latitude from frontmatter (for Leaflet day map), or null. */
+  latitude: number | null;
+  /** Longitude from frontmatter (for Leaflet day map), or null. */
+  longitude: number | null;
+}
+
+/** Read lat/long from frontmatter using configurable keys (also accepts `lng` / `longitude` when long key is `long`). */
+export function parseCoordinatesFromFrontmatter(
+  front: Record<string, unknown> | undefined,
+  latKey: string,
+  longKey: string
+): { lat: number; lng: number } | null {
+  if (!front) return null;
+  const latK = latKey.trim() || "lat";
+  const longK = longKey.trim() || "long";
+  const rawLat = front[latK] ?? front.latitude;
+  let rawLng = front[longK];
+  if (rawLng == null && longK === "long") rawLng = front.lng ?? front.longitude;
+  const lat = typeof rawLat === "number" ? rawLat : parseFloat(String(rawLat ?? ""));
+  const lng = typeof rawLng === "number" ? rawLng : parseFloat(String(rawLng ?? ""));
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return { lat, lng };
 }
 
 /** Rule shape for one entry type (name + mode + value). Order in array = priority. */
@@ -498,10 +520,14 @@ export async function getJournalEntries(
   entryProperty: string,
   journalProperty: string,
   entryTypes?: EntryTypeRuleShape[],
-  lapseEntriesProperty?: string
+  lapseEntriesProperty?: string,
+  leafletLatProperty?: string,
+  leafletLongProperty?: string
 ): Promise<JournalEntry[]> {
   const types = entryTypes ?? [];
   const lapseKey = (lapseEntriesProperty ?? "lapseEntries").trim() || null;
+  const latProp = (leafletLatProperty ?? "lat").trim() || "lat";
+  const longProp = (leafletLongProperty ?? "long").trim() || "long";
 
   const files = getMarkdownFilesInFolders(vault, folderList);
   const candidates: { file: TFile; date: string; timeStr: string; journal: string; entryName: string }[] = [];
@@ -593,6 +619,7 @@ export async function getJournalEntries(
       episodeRaw != null && (typeof episodeRaw === "number" || typeof episodeRaw === "string")
         ? episodeRaw
         : null;
+    const coords = parseCoordinatesFromFrontmatter(front, latProp, longProp);
     entries.push({
       file,
       date,
@@ -609,6 +636,8 @@ export async function getJournalEntries(
       showTitle,
       season,
       episode,
+      latitude: coords?.lat ?? null,
+      longitude: coords?.lng ?? null,
     });
   }
 

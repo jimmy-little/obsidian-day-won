@@ -78,6 +78,18 @@ BRAT installs from **GitHub Releases**; the release must include `main.js`, `man
 4. If install still fails (especially on mobile), check GitHub → Releases: the version you picked must have **Assets** with `main.js` attached. If not, run `npm run release` from this repo to create a proper release, then in BRAT use **Check for updates** or re-add the repo and pick the new version. Fully quit and reopen Obsidian. Release tags must match the version (e.g. `0.0.2`, not `v0.0.2`).
 5. **BRAT finds versions but install runs then fails:** BRAT may be using GitHub’s “Source code (zip)”, which does not contain the built `main.js`. Add a plugin zip to the release: run `node upload-plugin-zip-to-release.mjs 0.0.3` (use the version you’re testing), then try BRAT again. If it still fails, consider opening an issue on [obsidian42-brat](https://github.com/TfTHacker/obsidian42-brat) with your repo and release link.
 
+### Installing on phone via iCloud sync (no BRAT)
+
+If your vault lives in iCloud (e.g. **iCloud Drive → Obsidian → YourVault**), you can copy the built plugin into the vault on your computer; iCloud will sync it to your phone.
+
+1. **Edit the vault path** in `copy-to-vault.mjs` if yours is different (default: `~/Library/Mobile Documents/iCloud~md~obsidian/Documents/JimmyOS`).
+2. From this repo, run: `npm run build-sync`  
+   That builds the plugin and copies `main.js`, `manifest.json`, `styles.css`, `versions.json` into the vault’s `.obsidian/plugins/day-won/` folder (replacing any symlink from `link-vault`).
+3. Wait for iCloud to sync (or force sync from the Files app if needed).
+4. On your phone, open the vault in Obsidian → **Settings → Community plugins** → enable **Day, Won!**.
+
+After code changes, run `npm run build-sync` again; iCloud will sync the updated plugin.
+
 ### Repo
 
 - **Git:** https://github.com/jimmy-little/obsidian-day-won.git
